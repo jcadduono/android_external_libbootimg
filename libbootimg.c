@@ -20,8 +20,10 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include "mincrypt/sha.h"
 #include "bootimg.h"
+#ifdef ENABLE_SHA
+#include "mincrypt/sha.h"
+#endif
 
 static byte padding[131072] = { 0, };
 
@@ -337,6 +339,7 @@ oops:
 int write_boot_image(boot_img *image, const char *file)
 {
 	int fd;
+#ifdef ENABLE_SHA
 	const uint8_t* sha;
 	SHA_CTX ctx;
 
@@ -364,6 +367,7 @@ int write_boot_image(boot_img *image, const char *file)
 	sha = SHA_final(&ctx);
 	memcpy(image->hdr.id, sha,
 		SHA_DIGEST_SIZE > sizeof(image->hdr.id) ? sizeof(image->hdr.id) : SHA_DIGEST_SIZE);
+#endif
 
 	fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, 0666);
 	if (fd < 0)

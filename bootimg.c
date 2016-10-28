@@ -24,7 +24,6 @@
 #include <libgen.h>
 #include <sys/stat.h>
 
-#include "mincrypt/sha.h"
 #include "bootimg.h"
 
 #define APP_NAME "bootimg"
