@@ -122,18 +122,20 @@ int bootimg_set_board(boot_img *image, const char *board)
 
 int bootimg_set_cmdline(boot_img *image, const char *cmdline)
 {
-	int cmdlen;
+	//int cmdlen;
 
 	memset(&image->hdr.cmdline, 0, BOOT_ARGS_SIZE);
-	memset(&image->hdr.extra_cmdline, 0, BOOT_EXTRA_ARGS_SIZE);
+	//memset(&image->hdr.extra_cmdline, 0, BOOT_EXTRA_ARGS_SIZE);
 
-	if (cmdline == NULL) {
-		strcpy((char*)image->hdr.cmdline, "");
+	if (cmdline == NULL)
 		return 0;
-	}
 
+	if (strlen(cmdline) > BOOT_ARGS_SIZE - 1)
+		return EINVAL;
+
+	strncpy((char*)image->hdr.cmdline, cmdline, BOOT_ARGS_SIZE - 1);
+/*
 	cmdlen = strlen(cmdline);
-
 	if (cmdlen > (BOOT_ARGS_SIZE + BOOT_EXTRA_ARGS_SIZE - 2))
 		return EINVAL;
 
@@ -143,7 +145,7 @@ int bootimg_set_cmdline(boot_img *image, const char *cmdline)
 		cmdline += BOOT_ARGS_SIZE - 1;
 		strncpy((char*)image->hdr.extra_cmdline, cmdline, BOOT_EXTRA_ARGS_SIZE);
 	}
-
+*/
 	return 0;
 }
 
