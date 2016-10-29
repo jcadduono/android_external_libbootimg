@@ -15,7 +15,7 @@ else
 	bootimg_shared_libs += libbootimg
 endif
 
-ifdef BOOTIMG_SHA
+ifndef BOOTIMG_NO_SHA
 	libbootimg_src += mincrypt/sha.c
 	libbootimg_cflags += -DENABLE_SHA
 endif
