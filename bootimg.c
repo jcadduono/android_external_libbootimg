@@ -122,7 +122,7 @@ int main(int argc, char** argv)
 
 	for (i = 1; i < argc; i++) {
 		if (i == argc - 1) {
-			if (output == NULL) {
+			if (!output) {
 				output = argv[i];
 			} else
 				goto usage;
@@ -190,13 +190,13 @@ int main(int argc, char** argv)
 		 || !strcmp(argv[i], "--tags_offset")) {
 			tags_offset = strtoul(argv[++i], 0, 16);
 		} else
-		if (output == NULL) {
+		if (!output) {
 			output = argv[i];
 		} else
 			goto usage;
 	}
 
-	if (output == NULL)
+	if (!output)
 		goto usage;
 
 	ret = create_boot_image(&image,
@@ -223,10 +223,10 @@ int main(int argc, char** argv)
 unpack:
 	for (i = 1; i < argc; i++) {
 		if (i == argc - 1) {
-			if (input == NULL) {
+			if (!input) {
 				input = argv[i];
 			} else
-			if (output == NULL) {
+			if (!output) {
 				output = argv[i];
 			} else
 				goto usage;
@@ -250,16 +250,16 @@ unpack:
 		 || !strcmp(argv[i], "--output")) {
 			output = argv[++i];
 		} else
-		if (input == NULL) {
+		if (!input) {
 			input = argv[i];
 		} else
-		if (output == NULL) {
+		if (!output) {
 			output = argv[i];
 		} else
 			goto usage;
 	}
 
-	if (input == NULL || output == NULL)
+	if (!input || !output)
 		goto usage;
 
 	if (stat(input, &st) == -1) {

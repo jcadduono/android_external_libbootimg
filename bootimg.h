@@ -101,6 +101,8 @@ struct boot_img
 int bootimg_set_pagesize(boot_img *image, int pagesize);
 int bootimg_set_board(boot_img *image, const char *board);
 int bootimg_set_cmdline(boot_img *image, const char *cmdline);
+int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val);
+int bootimg_delete_cmdline_arg(boot_img *image, const char *arg);
 int bootimg_load_kernel(boot_img *image, const char *file);
 int bootimg_load_ramdisk(boot_img *image, const char *file);
 int bootimg_load_second(boot_img *image, const char *file);
