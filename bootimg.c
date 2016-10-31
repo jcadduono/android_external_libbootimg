@@ -94,39 +94,67 @@ int main(const int argc, const char** argv)
 	boot_img image;
 	char tmp[PATH_MAX], *bname;
 	char hextmp[16];
+	const char *c;
 	const char *input = 0, *output = 0;
 	const char *kernel = 0, *ramdisk = 0, *second = 0;
 	const char *dt = 0, *board = 0, *cmdline = 0;
-	int pagesize = 0;
+	int pagesize = 0, verbose = 0;
 	uint32_t base = 0;
 	uint32_t kernel_offset = 0, ramdisk_offset = 0;
 	uint32_t second_offset = 0, tags_offset = 0;
 	int mode = MODE_NONE;
-	int i, ret;
+	int i, ret, argstart;
 
-	if (argc < 1)
+	if (argc < 2)
 		goto usage;
 
-	for (i = 1; i < argc; i++) {
-		if (!strcmp(argv[i], "x")
-		 || !strcmp(argv[i], "-x")
+	// tar style argument parsing
+	for (argstart = 2, c = argv[1]; *c; c++) {
+		switch (*c) {
+		case '-':
+		case 'f':
+			continue;
+		case 'x':
+			mode = MODE_UNPACK;
+			continue;
+		case 'c':
+			mode = MODE_CREATE;
+			continue;
+		case 'v':
+			verbose = 1;
+			continue;
+		}
+		mode = MODE_NONE;
+		verbose = 0;
+		argstart = 1;
+		break;
+	}
+
+	for (i = argstart; i < argc; i++) {
+		if (!strcmp(argv[i], "-x")
 		 || !strcmp(argv[i], "--unpack")) {
 			mode = MODE_UNPACK;
 		} else
-		if (!strcmp(argv[i], "c")
-		 || !strcmp(argv[i], "-c")
+		if (!strcmp(argv[i], "-c")
 		 || !strcmp(argv[i], "--create")) {
 			mode = MODE_CREATE;
+		} else
+		if (!strcmp(argv[i], "-v")
+		 || !strcmp(argv[i], "--verbose")) {
+			verbose = 1;
 		}
 	}
 
-	if (mode == MODE_NONE)
-		goto usage;
+	if (mode == MODE_CREATE)
+		goto create;
 
 	if (mode == MODE_UNPACK)
 		goto unpack;
 
-	for (i = 1; i < argc; i++) {
+	goto usage;
+
+create:
+	for (i = argstart; i < argc; i++) {
 		if (i == argc - 1) {
 			if (!output) {
 				output = argv[i];
@@ -134,13 +162,11 @@ int main(const int argc, const char** argv)
 				goto usage;
 			break;
 		}
-		if (!strcmp(argv[i], "x")
-		 || !strcmp(argv[i], "-x")
+		if (!strcmp(argv[i], "-x")
 		 || !strcmp(argv[i], "--unpack")) {
 			// do nothing
 		} else
-		if (!strcmp(argv[i], "c")
-		 || !strcmp(argv[i], "-c")
+		if (!strcmp(argv[i], "-c")
 		 || !strcmp(argv[i], "--create")) {
 			// do nothing
 		} else
@@ -165,6 +191,7 @@ int main(const int argc, const char** argv)
 			dt = argv[++i];
 		} else
 		if (!strcmp(argv[i], "-m")
+		 || !strcmp(argv[i], "--magic")
 		 || !strcmp(argv[i], "--board")) {
 			board = argv[++i];
 		} else
@@ -215,6 +242,27 @@ int main(const int argc, const char** argv)
 		return ret;
 	}
 
+	if (verbose) {
+		base = image.hdr.kernel_addr - 0x00008000;
+		kernel_offset = image.hdr.kernel_addr - base;
+		ramdisk_offset = image.hdr.ramdisk_addr - base;
+		second_offset = image.hdr.second_addr - base;
+		tags_offset = image.hdr.tags_addr - base;
+
+		LOGV("BOARD_MAGIC \"%s\"", image.hdr.board);
+		LOGV("BOARD_CMDLINE \"%s\"", image.hdr.cmdline);
+		LOGV("BOARD_PAGESIZE %d", image.hdr.pagesize);
+		LOGV("BOARD_KERNEL_BASE 0x%08X", base);
+		LOGV("BOARD_KERNEL_OFFSET 0x%08X", kernel_offset);
+		LOGV("BOARD_RAMDISK_OFFSET 0x%08X", ramdisk_offset);
+		LOGV("BOARD_SECOND_OFFSET 0x%08X", second_offset);
+		LOGV("BOARD_TAGS_OFFSET 0x%08X", tags_offset);
+		LOGV("BOARD_KERNEL_SIZE %d", image.hdr.kernel_size);
+		LOGV("BOARD_RAMDISK_SIZE %d", image.hdr.ramdisk_size);
+		LOGV("BOARD_SECOND_SIZE %d", image.hdr.second_size);
+		LOGV("BOARD_DT_SIZE %d", image.hdr.dt_size);
+	}
+
 	ret = write_boot_image(&image, output);
 	if (ret) {
 		LOGE("Failed to write boot image '%s': %s",
@@ -227,7 +275,7 @@ int main(const int argc, const char** argv)
 	return ret;
 
 unpack:
-	for (i = 1; i < argc; i++) {
+	for (i = argstart; i < argc; i++) {
 		if (i == argc - 1) {
 			if (!input) {
 				input = argv[i];
@@ -238,13 +286,11 @@ unpack:
 				goto usage;
 			break;
 		}
-		if (!strcmp(argv[i], "x")
-		 || !strcmp(argv[i], "-x")
+		if (!strcmp(argv[i], "-x")
 		 || !strcmp(argv[i], "--unpack")) {
 			// do nothing
 		} else
-		if (!strcmp(argv[i], "c")
-		 || !strcmp(argv[i], "-c")
+		if (!strcmp(argv[i], "-c")
 		 || !strcmp(argv[i], "--create")) {
 			// do nothing
 		} else
@@ -281,64 +327,68 @@ unpack:
 		return errno;
 	}
 
+	base = image.hdr.kernel_addr - 0x00008000;
+	kernel_offset = image.hdr.kernel_addr - base;
+	ramdisk_offset = image.hdr.ramdisk_addr - base;
+	second_offset = image.hdr.second_addr - base;
+	tags_offset = image.hdr.tags_addr - base;
+
+	if (verbose) {
+		LOGV("BOARD_MAGIC \"%s\"", image.hdr.board);
+		LOGV("BOARD_CMDLINE \"%s\"", image.hdr.cmdline);
+		LOGV("BOARD_PAGESIZE %d", image.hdr.pagesize);
+		LOGV("BOARD_KERNEL_BASE 0x%08X", base);
+		LOGV("BOARD_KERNEL_OFFSET 0x%08X", kernel_offset);
+		LOGV("BOARD_RAMDISK_OFFSET 0x%08X", ramdisk_offset);
+		LOGV("BOARD_SECOND_OFFSET 0x%08X", second_offset);
+		LOGV("BOARD_TAGS_OFFSET 0x%08X", tags_offset);
+		LOGV("BOARD_KERNEL_SIZE %d", image.hdr.kernel_size);
+		LOGV("BOARD_RAMDISK_SIZE %d", image.hdr.ramdisk_size);
+		LOGV("BOARD_SECOND_SIZE %d", image.hdr.second_size);
+		LOGV("BOARD_DT_SIZE %d", image.hdr.dt_size);
+	}
+
 	bname = basename(input);
 
-	LOGV("BOARD_MAGIC \"%s\"", image.hdr.board);
 	sprintf(tmp, "%s/%s-board", output, bname);
 	write_string_to_file(tmp, (char*)image.hdr.board);
 
-	LOGV("BOARD_KERNEL_CMDLINE \"%s\"", image.hdr.cmdline);
 	sprintf(tmp, "%s/%s-cmdline", output, bname);
 	write_string_to_file(tmp, (char*)image.hdr.cmdline);
 
-	base = image.hdr.kernel_addr - 0x00008000;
-	LOGV("BOARD_KERNEL_BASE 0x%08X", base);
-	sprintf(tmp, "%s/%s-base", output, bname);
-	sprintf(hextmp, "%08x", base);
-	write_string_to_file(tmp, hextmp);
-
-	LOGV("BOARD_PAGE_SIZE %d", image.hdr.pagesize);
 	sprintf(tmp, "%s/%s-pagesize", output, bname);
 	sprintf(hextmp, "%d", image.hdr.pagesize);
 	write_string_to_file(tmp, hextmp);
 
-	kernel_offset = image.hdr.kernel_addr - base;
-	LOGV("BOARD_KERNEL_OFFSET 0x%08X", kernel_offset);
+	sprintf(tmp, "%s/%s-base", output, bname);
+	sprintf(hextmp, "%08X", base);
+	write_string_to_file(tmp, hextmp);
+
 	sprintf(tmp, "%s/%s-kernel_offset", output, bname);
-	sprintf(hextmp, "%08x", kernel_offset);
+	sprintf(hextmp, "%08X", kernel_offset);
 	write_string_to_file(tmp, hextmp);
 
-	ramdisk_offset = image.hdr.ramdisk_addr - base;
-	LOGV("BOARD_RAMDISK_OFFSET 0x%08X", ramdisk_offset);
 	sprintf(tmp, "%s/%s-ramdisk_offset", output, bname);
-	sprintf(hextmp, "%08x", ramdisk_offset);
+	sprintf(hextmp, "%08X", ramdisk_offset);
 	write_string_to_file(tmp, hextmp);
 
-	second_offset = image.hdr.second_addr - base;
-	LOGV("BOARD_SECOND_OFFSET 0x%08X", second_offset);
 	sprintf(tmp, "%s/%s-second_offset", output, bname);
-	sprintf(hextmp, "%08x", second_offset);
+	sprintf(hextmp, "%08X", second_offset);
 	write_string_to_file(tmp, hextmp);
 
-	tags_offset = image.hdr.tags_addr - base;
-	LOGV("BOARD_TAGS_OFFSET 0x%08X", tags_offset);
 	sprintf(tmp, "%s/%s-tags_offset", output, bname);
-	sprintf(hextmp, "%08x", tags_offset);
+	sprintf(hextmp, "%08X", tags_offset);
 	write_string_to_file(tmp, hextmp);
 
-	LOGV("BOARD_KERNEL_SIZE %d", image.hdr.kernel_size);
 	sprintf(tmp, "%s/%s-kernel", output, bname);
 	write_binary_to_file(tmp, image.kernel, image.hdr.kernel_size);
 
-	LOGV("BOARD_RAMDISK_SIZE %d", image.hdr.ramdisk_size);
 	sprintf(tmp, "%s/%s-ramdisk", output, bname);
 	write_binary_to_file(tmp, image.ramdisk, image.hdr.ramdisk_size);
 
-	LOGV("BOARD_SECOND_SIZE %d", image.hdr.second_size);
 	sprintf(tmp, "%s/%s-second", output, bname);
 	write_binary_to_file(tmp, image.second, image.hdr.second_size);
 
-	LOGV("BOARD_DT_SIZE %d", image.hdr.dt_size);
 	sprintf(tmp, "%s/%s-dt", output, bname);
 	write_binary_to_file(tmp, image.dt, image.hdr.dt_size);
 
@@ -347,12 +397,12 @@ unpack:
 
 	return 0;
 usage:
-	LOGE("Usage: %s [args...]", argv[0]);
+	LOGE("Usage: %s [xvcf] [args...]", argv[0]);
 	LOGE(
-		"  -x, --unpack   - unpacks an Android boot image\n"
+		" -x, --unpack   - unpack an Android boot image\n"
 		"     -i,  --input \"boot.img\"\n"
 		"     -o,  --output \"output directory\"\n"
-		"  -c, --create   - creates an Android boot image\n"
+		" -c, --create   - create an Android boot image\n"
 		"     -o,  --output \"boot.img\"\n"
 		"   [ -k,  --kernel \"kernel\"        ]\n"
 		"   [ -r,  --ramdisk \"ramdisk\"      ]\n"
@@ -365,7 +415,8 @@ usage:
 		"   [ -ko, --kernel_offset <hex>    ]\n"
 		"   [ -ro, --ramdisk_offset <hex>   ]\n"
 		"   [ -so, --second_offset <hex>    ]\n"
-		"   [ -to, --tags_offset <hex>      ]"
+		"   [ -to, --tags_offset <hex>      ]\n"
+		" -v, --verbose  - print boot image details"
 	);
 	return EINVAL;
 }
