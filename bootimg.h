@@ -98,7 +98,7 @@ struct boot_img
 **    else: jump to kernel_addr
 */
 
-int bootimg_set_pagesize(boot_img *image, int pagesize);
+int bootimg_set_pagesize(boot_img *image, const int pagesize);
 int bootimg_set_board(boot_img *image, const char *board);
 int bootimg_set_cmdline(boot_img *image, const char *cmdline);
 int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val);

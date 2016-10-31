@@ -19,15 +19,22 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 #include "bootimg.h"
 #ifdef ENABLE_SHA
 #include "mincrypt/sha.h"
 #endif
 
+// create new files as 0644
+#define NEW_FILE_PERMISSIONS (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+
+// create new directories as 0755
+#define NEW_DIR_PERMISSIONS (S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)
+
 static byte padding[131072] = { 0, };
 
-static void seek_padding(int fd, int pagesize, uint32_t itemsize)
+static void seek_padding(int fd, int pagesize, ssize_t itemsize)
 {
 	int pagemask = pagesize - 1;
 	int count;
@@ -40,7 +47,7 @@ static void seek_padding(int fd, int pagesize, uint32_t itemsize)
 	lseek(fd, count, SEEK_CUR);
 }
 
-static int write_padding(int fd, int pagesize, uint32_t itemsize)
+static int write_padding(int fd, int pagesize, ssize_t itemsize)
 {
 	int pagemask = pagesize - 1;
 	int count;
@@ -53,9 +60,10 @@ static int write_padding(int fd, int pagesize, uint32_t itemsize)
 	return (write(fd, padding, count) == count) ? 0 : -1;
 }
 
-static byte *load_file(const char *file, uint32_t *size)
+static byte *load_file(const char *file, ssize_t *size)
 {
-	int sz, fd;
+	int fd;
+	ssize_t sz;
 	byte *data;
 
 	fd = open(file, O_RDONLY);
@@ -86,7 +94,7 @@ oops:
 	return 0;
 }
 
-int bootimg_set_pagesize(boot_img *image, int pagesize)
+int bootimg_set_pagesize(boot_img *image, const int pagesize)
 {
 	switch (pagesize) {
 	case 2048: case 4096:
@@ -261,7 +269,7 @@ append_arg:
 	append++; // null terminator
 
 	if (len + append > BOOT_ARGS_SIZE)
-		goto fail; // can't fit new arg/val on cmdline
+		goto oops; // can't fit new arg/val on cmdline
 
 	if (len) // add a space
 		*(c++) = ' ';
@@ -281,7 +289,7 @@ done:
 	// fill the remaining space with null
 	memset(c, 0, BOOT_ARGS_SIZE - (c - str));
 	return 0;
-fail:
+oops:
 	memset(c, 0, BOOT_ARGS_SIZE - (c - str));
 	return E2BIG;
 }
@@ -323,7 +331,7 @@ int bootimg_load_kernel(boot_img *image, const char *file)
 	if (!file)
 		return 0;
 
-	image->kernel = load_file(file, &image->hdr.kernel_size);
+	image->kernel = load_file(file, (ssize_t*)&image->hdr.kernel_size);
 	return !image->kernel;
 }
 
@@ -338,7 +346,7 @@ int bootimg_load_ramdisk(boot_img *image, const char *file)
 	if (!file)
 		return 0;
 
-	image->ramdisk = load_file(file, &image->hdr.ramdisk_size);
+	image->ramdisk = load_file(file, (ssize_t*)&image->hdr.ramdisk_size);
 	return !image->ramdisk;
 }
 
@@ -353,7 +361,7 @@ int bootimg_load_second(boot_img *image, const char *file)
 	if (!file)
 		return 0;
 
-	image->second = load_file(file, &image->hdr.second_size);
+	image->second = load_file(file, (ssize_t*)&image->hdr.second_size);
 	return !image->second;
 }
 
@@ -368,7 +376,7 @@ int bootimg_load_dt(boot_img *image, const char *file)
 	if (!file)
 		return 0;
 
-	image->dt = load_file(file, &image->hdr.dt_size);
+	image->dt = load_file(file, (ssize_t*)&image->hdr.dt_size);
 	return !image->dt;
 }
 
@@ -409,7 +417,7 @@ int load_boot_image(boot_img *image, const char *file)
 
 	if (image->hdr.kernel_size) {
 		image->kernel = malloc(image->hdr.kernel_size);
-		if (read(fd, image->kernel, image->hdr.kernel_size) != image->hdr.kernel_size)
+		if (read(fd, image->kernel, image->hdr.kernel_size) != (ssize_t)image->hdr.kernel_size)
 			goto close;
 	}
 
@@ -417,7 +425,7 @@ int load_boot_image(boot_img *image, const char *file)
 
 	if (image->hdr.ramdisk_size) {
 		image->ramdisk = malloc(image->hdr.ramdisk_size);
-		if (read(fd, image->ramdisk, image->hdr.ramdisk_size) != image->hdr.ramdisk_size)
+		if (read(fd, image->ramdisk, image->hdr.ramdisk_size) != (ssize_t)image->hdr.ramdisk_size)
 			goto close;
 	}
 
@@ -425,7 +433,7 @@ int load_boot_image(boot_img *image, const char *file)
 
 	if (image->hdr.second_size) {
 		image->second = malloc(image->hdr.second_size);
-		if (read(fd, image->second, image->hdr.second_size) != image->hdr.second_size)
+		if (read(fd, image->second, image->hdr.second_size) != (ssize_t)image->hdr.second_size)
 			goto close;
 	}
 
@@ -433,7 +441,7 @@ int load_boot_image(boot_img *image, const char *file)
 
 	if (image->hdr.dt_size) {
 		image->dt = malloc(image->hdr.dt_size);
-		if (read(fd, image->dt, image->hdr.dt_size) != image->hdr.dt_size)
+		if (read(fd, image->dt, image->hdr.dt_size) != (ssize_t)image->hdr.dt_size)
 			goto close;
 	}
 
@@ -451,7 +459,7 @@ int create_boot_image(boot_img *image,
 	uint32_t kernel_offset, uint32_t ramdisk_offset,
 	uint32_t second_offset, uint32_t tags_offset)
 {
-	memset(&image->hdr, 0, sizeof(image->hdr));
+	memset(image, 0, sizeof(boot_img));
 
 	memcpy(&image->hdr.magic, BOOT_MAGIC, BOOT_MAGIC_SIZE);
 
@@ -505,7 +513,7 @@ int write_boot_image(boot_img *image, const char *file)
 {
 	int fd;
 #ifdef ENABLE_SHA
-	const uint8_t* sha;
+	const uint8_t *sha;
 	SHA_CTX ctx;
 
 	/*
@@ -534,7 +542,7 @@ int write_boot_image(boot_img *image, const char *file)
 		SHA_DIGEST_SIZE > sizeof(image->hdr.id) ? sizeof(image->hdr.id) : SHA_DIGEST_SIZE);
 #endif
 
-	fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, 0666);
+	fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, NEW_FILE_PERMISSIONS);
 	if (fd < 0)
 		return EACCES;
 
@@ -580,6 +588,8 @@ oops:
 
 void free_boot_image(boot_img *image)
 {
+	if (!image)
+		return;
 	if (image->kernel)
 		free(image->kernel);
 	if (image->ramdisk)

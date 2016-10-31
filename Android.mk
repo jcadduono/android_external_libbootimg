@@ -1,10 +1,8 @@
 LOCAL_PATH := $(call my-dir)
 
 libbootimg_src := libbootimg.c
-libbootimg_cflags := -Os
 
 bootimg_src := bootimg.c
-bootimg_cflags := -Os
 
 bootimg_static_libs :=
 bootimg_shared_libs :=
@@ -29,6 +27,7 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libbootimg-static
 LOCAL_SRC_FILES := $(libbootimg_src)
 LOCAL_CFLAGS += $(libbootimg_cflags)
+LOCAL_SDK_VERSION := 21
 LOCAL_MODULE_TAGS := optional
 include $(BUILD_STATIC_LIBRARY)
 
@@ -36,6 +35,7 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libbootimg
 LOCAL_SRC_FILES := $(libbootimg_src)
 LOCAL_CFLAGS += $(libbootimg_cflags)
+LOCAL_SDK_VERSION := 21
 LOCAL_MODULE_TAGS := optional
 include $(BUILD_SHARED_LIBRARY)
 
@@ -45,6 +45,7 @@ LOCAL_SRC_FILES := $(bootimg_src)
 LOCAL_CFLAGS += $(bootimg_cflags)
 LOCAL_STATIC_LIBRARIES := $(bootimg_static_libs)
 LOCAL_SHARED_LIBRARIES := $(bootimg_shared_libs)
+LOCAL_SDK_VERSION := 21
 LOCAL_MODULE_TAGS := optional
 include $(BUILD_EXECUTABLE)
 

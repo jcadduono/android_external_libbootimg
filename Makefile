@@ -1,10 +1,11 @@
 all: bootimg
 
-BOOTIMG_OBJ := bootimg.o libbootimg.o mincrypt/sha.o
+BOOTIMG_SRC := bootimg.c libbootimg.c mincrypt/sha.c
+CFLAGS += -DENABLE_SHA -Wall -Wpedantic -Wextra -std=gnu99
 
-bootimg: $(BOOTIMG_OBJ)
-	$(CC) $(LDFLAGS) $^ -o $@
+bootimg: $(BOOTIMG_SRC)
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@
 
 clean:
-	$(RM) -f bootimg $(BOOTIMG_OBJ)
+	$(RM) -f bootimg $(BOOTIMG_SRC:.c=.o)
 

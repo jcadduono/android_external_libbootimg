@@ -21,7 +21,6 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <limits.h>
-#include <libgen.h>
 #include <sys/stat.h>
 
 #include "bootimg.h"
@@ -30,12 +29,18 @@
 
 #ifdef DEBUG
 #include <android/log.h>
-#define LOGV(...) { __android_log_print(ANDROID_LOG_INFO, APP_NAME, __VA_ARGS__); printf(__VA_ARGS__); printf("\n"); }
+#define LOGV(...) { __android_log_print(ANDROID_LOG_INFO,  APP_NAME, __VA_ARGS__); printf(__VA_ARGS__); printf("\n"); }
 #define LOGE(...) { __android_log_print(ANDROID_LOG_ERROR, APP_NAME, __VA_ARGS__); fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); }
 #else
 #define LOGV(...) { printf(__VA_ARGS__); printf("\n"); }
 #define LOGE(...) { fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); }
 #endif
+
+// create new files as 0644
+#define NEW_FILE_PERMISSIONS (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+
+// create new directories as 0755
+#define NEW_DIR_PERMISSIONS (S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)
 
 enum {
 	MODE_NONE,
@@ -43,15 +48,15 @@ enum {
 	MODE_CREATE
 };
 
-int write_string_to_file(char* file, char* string)
+static int write_string_to_file(const char* file, const char* string)
 {
 	int fd, len = strlen(string);
 
-	fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, 0666);
+	fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, NEW_FILE_PERMISSIONS);
 	if (fd < 0)
 		return EACCES;
 
-	if (len > 0 && write(fd, string, len) != len)
+	if (len && write(fd, string, len) != len)
 		return EIO;
 
 	if (write(fd, "\n", 1) != 1)
@@ -61,40 +66,41 @@ int write_string_to_file(char* file, char* string)
 	return 0;
 }
 
-int write_binary_to_file(char* file, byte* binary, uint32_t size)
+static int write_binary_to_file(const char* file, const byte* binary, const ssize_t size)
 {
-	int fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, 0666);
+	int fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, NEW_FILE_PERMISSIONS);
 	if (fd < 0)
 		return EACCES;
 
-	if (size > 0 && write(fd, binary, size) != size)
+	if (size && write(fd, binary, size) != size)
 		return EIO;
 
 	close(fd);
 	return 0;
 }
 
-int main(int argc, char** argv)
+static char *basename(char const *path)
+{
+	const char *s = strrchr(path, '/');
+	if (!s) {
+		return strdup(path);
+	} else {
+		return strdup(s + 1);
+	}
+}
+
+int main(const int argc, const char** argv)
 {
 	boot_img image;
-	struct stat st = {0};
-	char tmp[PATH_MAX];
+	char tmp[PATH_MAX], *bname;
 	char hextmp[16];
-	char *input = NULL;
-	char *output = NULL;
-	char *bname = NULL;
-	char *kernel = NULL;
-	char *ramdisk = NULL;
-	char *second = NULL;
-	char *dt = NULL;
-	char *board = NULL;
-	char *cmdline = NULL;
+	const char *input = 0, *output = 0;
+	const char *kernel = 0, *ramdisk = 0, *second = 0;
+	const char *dt = 0, *board = 0, *cmdline = 0;
 	int pagesize = 0;
 	uint32_t base = 0;
-	uint32_t kernel_offset = 0;
-	uint32_t ramdisk_offset = 0;
-	uint32_t second_offset = 0;
-	uint32_t tags_offset = 0;
+	uint32_t kernel_offset = 0, ramdisk_offset = 0;
+	uint32_t second_offset = 0, tags_offset = 0;
 	int mode = MODE_NONE;
 	int i, ret;
 
@@ -262,11 +268,6 @@ unpack:
 	if (!input || !output)
 		goto usage;
 
-	if (stat(input, &st) == -1) {
-		LOGE("Could not find input boot image '%s'.", input);
-		return ENOENT;
-	}
-
 	ret = load_boot_image(&image, input);
 	if (ret) {
 		LOGE("Failed to load boot image '%s': %s",
@@ -274,14 +275,10 @@ unpack:
 		return ret;
 	}
 
-	if (stat(output, &st) == -1) {
-		mkdir(output, 0755);
-		stat(output, &st);
-	}
-
-	if (!S_ISDIR(st.st_mode)) {
-		LOGE("Could not create output directory '%s'.", output);
-		return EACCES;
+	if (mkdir(output, NEW_DIR_PERMISSIONS)) {
+		LOGE("Could not create output directory '%s': %s",
+			output, strerror(errno));
+		return errno;
 	}
 
 	bname = basename(input);
@@ -345,6 +342,7 @@ unpack:
 	sprintf(tmp, "%s/%s-dt", output, bname);
 	write_binary_to_file(tmp, image.dt, image.hdr.dt_size);
 
+	free(bname);
 	free_boot_image(&image);
 
 	return 0;
