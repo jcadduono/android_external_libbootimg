@@ -104,6 +104,7 @@ int main(const int argc, const char** argv)
 	uint32_t second_offset = 0, tags_offset = 0;
 	int mode = MODE_NONE;
 	int i, ret, argstart;
+	char *hash;
 
 	if (argc < 2)
 		goto usage;
@@ -243,24 +244,26 @@ create:
 	}
 
 	if (verbose) {
-		base = image.hdr.kernel_addr - 0x00008000;
+		base = image.hdr.kernel_addr - 0x00008000U;
 		kernel_offset = image.hdr.kernel_addr - base;
 		ramdisk_offset = image.hdr.ramdisk_addr - base;
 		second_offset = image.hdr.second_addr - base;
 		tags_offset = image.hdr.tags_addr - base;
+		hash = bootimg_read_hash(&image);
 
 		LOGV("BOARD_MAGIC \"%s\"", image.hdr.board);
 		LOGV("BOARD_CMDLINE \"%s\"", image.hdr.cmdline);
-		LOGV("BOARD_PAGESIZE %d", image.hdr.pagesize);
+		LOGV("BOARD_ID_HASH 0x%s", hash);
+		LOGV("BOARD_PAGESIZE %u", image.hdr.pagesize);
 		LOGV("BOARD_KERNEL_BASE 0x%08X", base);
 		LOGV("BOARD_KERNEL_OFFSET 0x%08X", kernel_offset);
 		LOGV("BOARD_RAMDISK_OFFSET 0x%08X", ramdisk_offset);
 		LOGV("BOARD_SECOND_OFFSET 0x%08X", second_offset);
 		LOGV("BOARD_TAGS_OFFSET 0x%08X", tags_offset);
-		LOGV("BOARD_KERNEL_SIZE %d", image.hdr.kernel_size);
-		LOGV("BOARD_RAMDISK_SIZE %d", image.hdr.ramdisk_size);
-		LOGV("BOARD_SECOND_SIZE %d", image.hdr.second_size);
-		LOGV("BOARD_DT_SIZE %d", image.hdr.dt_size);
+		LOGV("BOARD_KERNEL_SIZE %u", image.hdr.kernel_size);
+		LOGV("BOARD_RAMDISK_SIZE %u", image.hdr.ramdisk_size);
+		LOGV("BOARD_SECOND_SIZE %u", image.hdr.second_size);
+		LOGV("BOARD_DT_SIZE %u", image.hdr.dt_size);
 	}
 
 	ret = write_boot_image(&image, output);
@@ -332,20 +335,22 @@ unpack:
 	ramdisk_offset = image.hdr.ramdisk_addr - base;
 	second_offset = image.hdr.second_addr - base;
 	tags_offset = image.hdr.tags_addr - base;
+	hash = bootimg_read_hash(&image);
 
 	if (verbose) {
 		LOGV("BOARD_MAGIC \"%s\"", image.hdr.board);
 		LOGV("BOARD_CMDLINE \"%s\"", image.hdr.cmdline);
-		LOGV("BOARD_PAGESIZE %d", image.hdr.pagesize);
+		LOGV("BOARD_ID_HASH 0x%s", hash);
+		LOGV("BOARD_PAGESIZE %u", image.hdr.pagesize);
 		LOGV("BOARD_KERNEL_BASE 0x%08X", base);
 		LOGV("BOARD_KERNEL_OFFSET 0x%08X", kernel_offset);
 		LOGV("BOARD_RAMDISK_OFFSET 0x%08X", ramdisk_offset);
 		LOGV("BOARD_SECOND_OFFSET 0x%08X", second_offset);
 		LOGV("BOARD_TAGS_OFFSET 0x%08X", tags_offset);
-		LOGV("BOARD_KERNEL_SIZE %d", image.hdr.kernel_size);
-		LOGV("BOARD_RAMDISK_SIZE %d", image.hdr.ramdisk_size);
-		LOGV("BOARD_SECOND_SIZE %d", image.hdr.second_size);
-		LOGV("BOARD_DT_SIZE %d", image.hdr.dt_size);
+		LOGV("BOARD_KERNEL_SIZE %u", image.hdr.kernel_size);
+		LOGV("BOARD_RAMDISK_SIZE %u", image.hdr.ramdisk_size);
+		LOGV("BOARD_SECOND_SIZE %u", image.hdr.second_size);
+		LOGV("BOARD_DT_SIZE %u", image.hdr.dt_size);
 	}
 
 	bname = basename(input);
@@ -357,7 +362,7 @@ unpack:
 	write_string_to_file(tmp, (char*)image.hdr.cmdline);
 
 	sprintf(tmp, "%s/%s-pagesize", output, bname);
-	sprintf(hextmp, "%d", image.hdr.pagesize);
+	sprintf(hextmp, "%u", image.hdr.pagesize);
 	write_string_to_file(tmp, hextmp);
 
 	sprintf(tmp, "%s/%s-base", output, bname);
@@ -392,6 +397,7 @@ unpack:
 	sprintf(tmp, "%s/%s-dt", output, bname);
 	write_binary_to_file(tmp, image.dt, image.hdr.dt_size);
 
+	free(hash);
 	free(bname);
 	free_boot_image(&image);
 
