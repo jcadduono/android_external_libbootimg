@@ -1,8 +1,10 @@
 LOCAL_PATH := $(call my-dir)
 
 libbootimg_src := libbootimg.c
+libbootimg_cflags := -Os
 
 bootimg_src := bootimg.c
+bootimg_cflags := -Os
 
 bootimg_static_libs :=
 bootimg_shared_libs :=
