@@ -29,10 +29,12 @@ typedef unsigned char byte;
 #define BOOT_BOARD_SIZE 16
 #define BOOT_ARGS_SIZE 512
 #define BOOT_EXTRA_ARGS_SIZE 1024
+#define BOOT_HASH_SIZE 20
+#define BOOT_RESERVED_SIZE 12
 
 struct boot_img_hdr
 {
-	uint8_t magic[BOOT_MAGIC_SIZE];
+	byte magic[BOOT_MAGIC_SIZE];
 
 	uint32_t kernel_size;  /* size in bytes */
 	uint32_t kernel_addr;  /* physical load addr */
@@ -48,15 +50,17 @@ struct boot_img_hdr
 	uint32_t dt_size;      /* device tree in bytes */
 	uint32_t unused;       /* future expansion: should be 0 */
 
-	uint8_t board[BOOT_BOARD_SIZE]; /* asciiz product name */
+	byte board[BOOT_BOARD_SIZE]; /* asciiz product name */
 
-	uint8_t cmdline[BOOT_ARGS_SIZE];
+	byte cmdline[BOOT_ARGS_SIZE]; /* kernel command line */
 
-	uint32_t id[8]; /* timestamp / checksum / sha1 / etc */
+	byte hash[BOOT_HASH_SIZE]; /* sha1 (kernel + ramdisk + second + dt) */
+
+	byte reserved[BOOT_RESERVED_SIZE]; /* modification timestamp? */
 
 	/* Supplemental command line data; kept here to maintain
 	* binary compatibility with older versions of mkbootimg */
-	uint8_t extra_cmdline[BOOT_EXTRA_ARGS_SIZE];
+	byte extra_cmdline[BOOT_EXTRA_ARGS_SIZE];
 } __attribute__((packed));
 
 struct boot_img
@@ -103,18 +107,18 @@ struct boot_img
 **    else: jump to kernel_addr
 */
 
+byte *bootimg_generate_hash(const boot_img *image);
 void bootimg_update_hash(boot_img *image);
-char *bootimg_read_hash(boot_img *image);
 
 int bootimg_load_kernel(boot_img *image, const char *file);
 int bootimg_load_ramdisk(boot_img *image, const char *file);
 int bootimg_load_second(boot_img *image, const char *file);
 int bootimg_load_dt(boot_img *image, const char *file);
 
-int bootimg_save_kernel(boot_img *image, const char *file);
-int bootimg_save_ramdisk(boot_img *image, const char *file);
-int bootimg_save_second(boot_img *image, const char *file);
-int bootimg_save_dt(boot_img *image, const char *file);
+int bootimg_save_kernel(const boot_img *image, const char *file);
+int bootimg_save_ramdisk(const boot_img *image, const char *file);
+int bootimg_save_second(const boot_img *image, const char *file);
+int bootimg_save_dt(const boot_img *image, const char *file);
 
 int bootimg_set_board(boot_img *image, const char *board);
 
@@ -134,7 +138,7 @@ boot_img *new_boot_image(void);
 
 boot_img *load_boot_image(const char *file);
 
-int write_boot_image(boot_img *image, const char *file);
+int write_boot_image(const boot_img *image, const char *file);
 
 void free_boot_image(boot_img *image);
 

@@ -1,6 +1,6 @@
 LOCAL_PATH := $(call my-dir)
 
-libbootimg_src := libbootimg.c
+libbootimg_src := libbootimg.c mincrypt/sha.c
 libbootimg_cflags := -Os
 
 bootimg_src := bootimg.c
@@ -13,11 +13,6 @@ ifdef BOOTIMG_STATIC
 	bootimg_static_libs += libbootimg-static
 else
 	bootimg_shared_libs += libbootimg
-endif
-
-ifndef BOOTIMG_NO_SHA
-	libbootimg_src += mincrypt/sha.c
-	libbootimg_cflags += -DENABLE_SHA
 endif
 
 ifdef BOOTIMG_LOGGING

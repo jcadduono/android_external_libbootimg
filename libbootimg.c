@@ -15,7 +15,6 @@
 */
 
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -23,10 +22,7 @@
 #include <sys/stat.h>
 
 #include "bootimg.h"
-
-#ifdef ENABLE_SHA
 #include "mincrypt/sha.h"
-#endif
 
 /* create new files as 0644 */
 #define NEW_FILE_PERMISSIONS (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
@@ -120,52 +116,36 @@ close:
 	return 0;
 }
 
-char *bootimg_read_hash(boot_img *image)
+byte *bootimg_generate_hash(const boot_img *image)
 {
-	int i;
-	char *hash = malloc(sizeof(char) * 41);
-	char *c = hash;
-	for (i = 0; i < (int)(sizeof(image->hdr.id) / sizeof(image->hdr.id[0])); i++) {
-		c += sprintf(c, "%02x", image->hdr.id[i]);
-	}
-	return hash;
-}
-
-void bootimg_update_hash(boot_img *image)
-{
-#ifdef ENABLE_SHA
-	const uint8_t *sha;
 	SHA_CTX ctx;
+	byte *hash = calloc(sizeof(byte), BOOT_HASH_SIZE);
 
-	/*
-	 * put a hash of the contents in the header so boot images can be
-	 * differentiated based on their first 2k.
-	 */
 	SHA_init(&ctx);
 
-	if (image->kernel) {
-		SHA_update(&ctx, image->kernel, image->hdr.kernel_size);
-		SHA_update(&ctx, &image->hdr.kernel_size, sizeof(image->hdr.kernel_size));
-	}
-	if (image->ramdisk) {
-		SHA_update(&ctx, image->ramdisk, image->hdr.ramdisk_size);
-		SHA_update(&ctx, &image->hdr.ramdisk_size, sizeof(image->hdr.ramdisk_size));
-	}
-	if (image->second) {
-		SHA_update(&ctx, image->second, image->hdr.second_size);
-		SHA_update(&ctx, &image->hdr.second_size, sizeof(image->hdr.second_size));
-	}
+	SHA_update(&ctx, image->kernel, image->hdr.kernel_size);
+	SHA_update(&ctx, &image->hdr.kernel_size, sizeof(image->hdr.kernel_size));
+
+	SHA_update(&ctx, image->ramdisk, image->hdr.ramdisk_size);
+	SHA_update(&ctx, &image->hdr.ramdisk_size, sizeof(image->hdr.ramdisk_size));
+
+	SHA_update(&ctx, image->second, image->hdr.second_size);
+	SHA_update(&ctx, &image->hdr.second_size, sizeof(image->hdr.second_size));
+
 	if (image->dt) {
 		SHA_update(&ctx, image->dt, image->hdr.dt_size);
 		SHA_update(&ctx, &image->hdr.dt_size, sizeof(image->hdr.dt_size));
 	}
 
-	sha = SHA_final(&ctx);
-	memcpy(image->hdr.id, sha, SHA_DIGEST_SIZE);
-	memset(image->hdr.id + SHA_DIGEST_SIZE, 0, sizeof(image->hdr.id) - SHA_DIGEST_SIZE);
-#else
-	memset(image->hdr.id, 0, sizeof(image->hdr.id));
-#endif
+	memcpy(hash, SHA_final(&ctx), SHA_DIGEST_SIZE);
+	return hash;
+}
+
+void bootimg_update_hash(boot_img *image)
+{
+	byte *hash = bootimg_generate_hash(image);
+	memcpy(image->hdr.hash, hash, BOOT_HASH_SIZE);
+	free(hash);
 }
 
 int bootimg_load_kernel(boot_img *image, const char *file)
@@ -173,7 +153,7 @@ int bootimg_load_kernel(boot_img *image, const char *file)
 	if (image->kernel)
 		free(image->kernel);
 
-	image->ramdisk = 0;
+	image->kernel = 0;
 	image->hdr.kernel_size = 0;
 
 	if (!file)
@@ -228,22 +208,22 @@ int bootimg_load_dt(boot_img *image, const char *file)
 	return !image->dt;
 }
 
-int bootimg_save_kernel(boot_img *image, const char *file)
+int bootimg_save_kernel(const boot_img *image, const char *file)
 {
 	return save_file(file, image->kernel, image->hdr.kernel_size);
 }
 
-int bootimg_save_ramdisk(boot_img *image, const char *file)
+int bootimg_save_ramdisk(const boot_img *image, const char *file)
 {
 	return save_file(file, image->ramdisk, image->hdr.ramdisk_size);
 }
 
-int bootimg_save_second(boot_img *image, const char *file)
+int bootimg_save_second(const boot_img *image, const char *file)
 {
 	return save_file(file, image->second, image->hdr.second_size);
 }
 
-int bootimg_save_dt(boot_img *image, const char *file)
+int bootimg_save_dt(const boot_img *image, const char *file)
 {
 	return save_file(file, image->dt, image->hdr.dt_size);
 }
@@ -252,13 +232,11 @@ int bootimg_set_board(boot_img *image, const char *board)
 {
 	memset(&image->hdr.board, 0, BOOT_BOARD_SIZE);
 
-	if (!board) {
-		strcpy((char*)image->hdr.board, "");
+	if (!board || !*board)
 		return 0;
-	}
 
 	if (strlen(board) >= BOOT_BOARD_SIZE)
-		return E2BIG;
+		return EMSGSIZE;
 
 	strcpy((char*)image->hdr.board, board);
 
@@ -428,7 +406,7 @@ done:
 	return 0;
 oops:
 	memset(c, 0, BOOT_ARGS_SIZE - (c - str));
-	return E2BIG;
+	return EMSGSIZE;
 }
 
 int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val)
@@ -443,15 +421,13 @@ int bootimg_delete_cmdline_arg(boot_img *image, const char *arg)
 
 int bootimg_set_cmdline(boot_img *image, const char *cmdline)
 {
-	int len = cmdline ? strlen(cmdline) : 0;
-
-	if (!len) {
+	if (!cmdline || !*cmdline) {
 		memset(&image->hdr.cmdline, 0, BOOT_ARGS_SIZE);
 		return 0;
 	}
 
-	if (len > BOOT_ARGS_SIZE - 1)
-		return E2BIG;
+	if (strlen(cmdline) > BOOT_ARGS_SIZE - 1)
+		return EMSGSIZE;
 
 	strcpy((char*)image->hdr.cmdline, cmdline);
 	return cmdline_update(image, 0, 0, 0);
@@ -602,7 +578,7 @@ oops:
 	return 0;
 }
 
-int write_boot_image(boot_img *image, const char *file)
+int write_boot_image(const boot_img *image, const char *file)
 {
 	int fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, NEW_FILE_PERMISSIONS);
 	if (fd < 0)
