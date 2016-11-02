@@ -23,17 +23,22 @@
 #include <sys/stat.h>
 
 #include "bootimg.h"
+
 #ifdef ENABLE_SHA
 #include "mincrypt/sha.h"
-#else
-#include <time.h>
 #endif
 
-// create new files as 0644
+/* create new files as 0644 */
 #define NEW_FILE_PERMISSIONS (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
-// create new directories as 0755
-#define NEW_DIR_PERMISSIONS (S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)
+/* defaults when creating a new boot image */
+#define BOOTIMG_DEFAULT_PAGESIZE       2048
+
+#define BOOTIMG_DEFAULT_BASE           0x10000000U
+#define BOOTIMG_DEFAULT_KERNEL_OFFSET  0x00008000U
+#define BOOTIMG_DEFAULT_RAMDISK_OFFSET 0x01000000U
+#define BOOTIMG_DEFAULT_SECOND_OFFSET  0x00F00000U
+#define BOOTIMG_DEFAULT_TAGS_OFFSET    0x00000100U
 
 static byte padding[131072] = { 0, };
 
@@ -97,6 +102,24 @@ oops:
 	return 0;
 }
 
+static int save_file(const char* file, const byte* binary, const uint32_t size)
+{
+	int fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, NEW_FILE_PERMISSIONS);
+	if (fd < 0)
+		return EACCES;
+
+	if (!binary || !size)
+		goto close;
+
+	if (write(fd, binary, size) != (off_t)size) {
+		close(fd);
+		return EIO;
+	}
+close:
+	close(fd);
+	return 0;
+}
+
 char *bootimg_read_hash(boot_img *image)
 {
 	int i;
@@ -110,7 +133,6 @@ char *bootimg_read_hash(boot_img *image)
 
 void bootimg_update_hash(boot_img *image)
 {
-	memset(image->hdr.id, 0, sizeof(image->hdr.id));
 #ifdef ENABLE_SHA
 	const uint8_t *sha;
 	SHA_CTX ctx;
@@ -120,6 +142,7 @@ void bootimg_update_hash(boot_img *image)
 	 * differentiated based on their first 2k.
 	 */
 	SHA_init(&ctx);
+
 	if (image->kernel) {
 		SHA_update(&ctx, image->kernel, image->hdr.kernel_size);
 		SHA_update(&ctx, &image->hdr.kernel_size, sizeof(image->hdr.kernel_size));
@@ -136,30 +159,93 @@ void bootimg_update_hash(boot_img *image)
 		SHA_update(&ctx, image->dt, image->hdr.dt_size);
 		SHA_update(&ctx, &image->hdr.dt_size, sizeof(image->hdr.dt_size));
 	}
+
 	sha = SHA_final(&ctx);
-	memcpy(image->hdr.id, sha,
-		SHA_DIGEST_SIZE > sizeof(image->hdr.id) ? sizeof(image->hdr.id) : SHA_DIGEST_SIZE);
+	memcpy(image->hdr.id, sha, SHA_DIGEST_SIZE);
+	memset(image->hdr.id + SHA_DIGEST_SIZE, 0, sizeof(image->hdr.id) - SHA_DIGEST_SIZE);
 #else
-	time_t now = time(0);
-	sprintf((char*)image->hdr.id, "%u", (unsigned)now);
+	memset(image->hdr.id, 0, sizeof(image->hdr.id));
 #endif
 }
 
-int bootimg_set_pagesize(boot_img *image, const int pagesize)
+int bootimg_load_kernel(boot_img *image, const char *file)
 {
-	switch (pagesize) {
-	case 2048: case 4096:
-	case 8192: case 16384:
-	case 32768: case 65536:
-	case 131072:
-		image->hdr.pagesize = pagesize;
+	if (image->kernel)
+		free(image->kernel);
+
+	image->ramdisk = 0;
+	image->hdr.kernel_size = 0;
+
+	if (!file)
 		return 0;
-	case 0:
-		image->hdr.pagesize = 2048;
+
+	image->kernel = load_file(file, &image->hdr.kernel_size);
+	return !image->kernel;
+}
+
+int bootimg_load_ramdisk(boot_img *image, const char *file)
+{
+	if (image->ramdisk)
+		free(image->ramdisk);
+
+	image->ramdisk = 0;
+	image->hdr.ramdisk_size = 0;
+
+	if (!file)
 		return 0;
-	default:
-		return EINVAL;
-	}
+
+	image->ramdisk = load_file(file, &image->hdr.ramdisk_size);
+	return !image->ramdisk;
+}
+
+int bootimg_load_second(boot_img *image, const char *file)
+{
+	if (image->second)
+		free(image->second);
+
+	image->second = 0;
+	image->hdr.second_size = 0;
+
+	if (!file)
+		return 0;
+
+	image->second = load_file(file, &image->hdr.second_size);
+	return !image->second;
+}
+
+int bootimg_load_dt(boot_img *image, const char *file)
+{
+	if (image->dt)
+		free(image->dt);
+
+	image->dt = 0;
+	image->hdr.dt_size = 0;
+
+	if (!file)
+		return 0;
+
+	image->dt = load_file(file, &image->hdr.dt_size);
+	return !image->dt;
+}
+
+int bootimg_save_kernel(boot_img *image, const char *file)
+{
+	return save_file(file, image->kernel, image->hdr.kernel_size);
+}
+
+int bootimg_save_ramdisk(boot_img *image, const char *file)
+{
+	return save_file(file, image->ramdisk, image->hdr.ramdisk_size);
+}
+
+int bootimg_save_second(boot_img *image, const char *file)
+{
+	return save_file(file, image->second, image->hdr.second_size);
+}
+
+int bootimg_save_dt(boot_img *image, const char *file)
+{
+	return save_file(file, image->dt, image->hdr.dt_size);
 }
 
 int bootimg_set_board(boot_img *image, const char *board)
@@ -172,7 +258,7 @@ int bootimg_set_board(boot_img *image, const char *board)
 	}
 
 	if (strlen(board) >= BOOT_BOARD_SIZE)
-		return EINVAL;
+		return E2BIG;
 
 	strcpy((char*)image->hdr.board, board);
 
@@ -345,6 +431,16 @@ oops:
 	return E2BIG;
 }
 
+int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val)
+{
+	return cmdline_update(image, arg, val, 0);
+}
+
+int bootimg_delete_cmdline_arg(boot_img *image, const char *arg)
+{
+	return cmdline_update(image, arg, 0, 1);
+}
+
 int bootimg_set_cmdline(boot_img *image, const char *cmdline)
 {
 	int len = cmdline ? strlen(cmdline) : 0;
@@ -361,84 +457,86 @@ int bootimg_set_cmdline(boot_img *image, const char *cmdline)
 	return cmdline_update(image, 0, 0, 0);
 }
 
-int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val)
+int bootimg_set_pagesize(boot_img *image, const int pagesize)
 {
-	return cmdline_update(image, arg, val, 0);
+	switch (pagesize) {
+	case 2048: case 4096:
+	case 8192: case 16384:
+	case 32768: case 65536:
+	case 131072:
+		image->hdr.pagesize = pagesize;
+		return 0;
+	case 0:
+		image->hdr.pagesize = BOOTIMG_DEFAULT_PAGESIZE;
+		return 0;
+	default:
+		return EINVAL;
+	}
 }
 
-int bootimg_delete_cmdline_arg(boot_img *image, const char *arg)
+void bootimg_set_base(boot_img *image, const uint32_t base)
 {
-	return cmdline_update(image, arg, 0, 1);
+	image->hdr.kernel_addr  = base + image->kernel_offset;
+	image->hdr.ramdisk_addr = base + image->ramdisk_offset;
+	image->hdr.second_addr  = base + image->second_offset;
+	image->hdr.tags_addr    = base + image->tags_offset;
 }
 
-int bootimg_load_kernel(boot_img *image, const char *file)
+void bootimg_set_kernel_offset(boot_img *image, const uint32_t offset)
 {
-	if (image->kernel)
-		free(image->kernel);
+	image->kernel_offset    = offset;
+	image->hdr.kernel_addr  = image->base + offset;
+}
 
-	image->ramdisk = 0;
-	image->hdr.kernel_size = 0;
+void bootimg_set_ramdisk_offset(boot_img *image, const uint32_t offset)
+{
+	image->ramdisk_offset   = offset;
+	image->hdr.ramdisk_addr = image->base + offset;
+}
 
-	if (!file)
+void bootimg_set_second_offset(boot_img *image, const uint32_t offset)
+{
+	image->second_offset    = offset;
+	image->hdr.second_addr  = image->base + offset;
+}
+
+void bootimg_set_tags_offset(boot_img *image, const uint32_t offset)
+{
+	image->tags_offset      = offset;
+	image->hdr.tags_addr    = image->base + offset;
+}
+
+boot_img *new_boot_image(void)
+{
+	boot_img *image;
+
+	image = calloc(1, sizeof(*image));
+	if (!image)
 		return 0;
 
-	image->kernel = load_file(file, &image->hdr.kernel_size);
-	return !image->kernel;
+	memcpy(&image->hdr.magic, BOOT_MAGIC, BOOT_MAGIC_SIZE);
+
+	image->base = BOOTIMG_DEFAULT_BASE;
+
+	bootimg_set_kernel_offset(image,  BOOTIMG_DEFAULT_KERNEL_OFFSET);
+	bootimg_set_ramdisk_offset(image, BOOTIMG_DEFAULT_RAMDISK_OFFSET);
+	bootimg_set_second_offset(image,  BOOTIMG_DEFAULT_SECOND_OFFSET);
+	bootimg_set_tags_offset(image,    BOOTIMG_DEFAULT_TAGS_OFFSET);
+
+	bootimg_set_pagesize(image, BOOTIMG_DEFAULT_PAGESIZE);
+
+	return image;
 }
 
-int bootimg_load_ramdisk(boot_img *image, const char *file)
+boot_img *load_boot_image(const char *file)
 {
-	if (image->ramdisk)
-		free(image->ramdisk);
-
-	image->ramdisk = 0;
-	image->hdr.ramdisk_size = 0;
-
-	if (!file)
-		return 0;
-
-	image->ramdisk = load_file(file, &image->hdr.ramdisk_size);
-	return !image->ramdisk;
-}
-
-int bootimg_load_second(boot_img *image, const char *file)
-{
-	if (image->second)
-		free(image->second);
-
-	image->second = 0;
-	image->hdr.second_size = 0;
-
-	if (!file)
-		return 0;
-
-	image->second = load_file(file, &image->hdr.second_size);
-	return !image->second;
-}
-
-int bootimg_load_dt(boot_img *image, const char *file)
-{
-	if (image->dt)
-		free(image->dt);
-
-	image->dt = 0;
-	image->hdr.dt_size = 0;
-
-	if (!file)
-		return 0;
-
-	image->dt = load_file(file, &image->hdr.dt_size);
-	return !image->dt;
-}
-
-int load_boot_image(boot_img *image, const char *file)
-{
-	int ret, fd, i;
+	int fd, i;
 	char magic[BOOT_MAGIC_SIZE];
+	boot_img *image;
 
 	fd = open(file, O_RDONLY);
 	if (fd < 0)
-		return ENOENT;
+		return 0;
 
 	for (i = 0; i <= 4096; i++) {
 		lseek(fd, i, SEEK_SET);
@@ -447,29 +545,30 @@ int load_boot_image(boot_img *image, const char *file)
 			break;
 	}
 
-	if (i > 4096) {
-		ret = EINVAL;
-		goto close;
-	}
+	if (i > 4096)
+		goto oops;
 
 	lseek(fd, i, SEEK_SET);
 
-	ret = EIO;
-
-	image->kernel = 0;
-	image->ramdisk = 0;
-	image->second = 0;
-	image->dt = 0;
+	image = calloc(1, sizeof(*image));
+	if (!image)
+		return 0;
 
 	if (read(fd, &image->hdr, sizeof(image->hdr)) != sizeof(image->hdr))
-		goto close;
+		goto oops;
+
+	image->base = image->hdr.kernel_addr - 0x00008000U;
+	image->kernel_offset = image->hdr.kernel_addr - image->base;
+	image->ramdisk_offset = image->hdr.ramdisk_addr - image->base;
+	image->second_offset = image->hdr.second_addr - image->base;
+	image->tags_offset = image->hdr.tags_addr - image->base;
 
 	seek_padding(fd, image->hdr.pagesize, sizeof(image->hdr));
 
 	if (image->hdr.kernel_size) {
 		image->kernel = malloc(image->hdr.kernel_size);
 		if (read(fd, image->kernel, image->hdr.kernel_size) != (off_t)image->hdr.kernel_size)
-			goto close;
+			goto oops;
 	}
 
 	seek_padding(fd, image->hdr.pagesize, image->hdr.kernel_size);
@@ -477,7 +576,7 @@ int load_boot_image(boot_img *image, const char *file)
 	if (image->hdr.ramdisk_size) {
 		image->ramdisk = malloc(image->hdr.ramdisk_size);
 		if (read(fd, image->ramdisk, image->hdr.ramdisk_size) != (off_t)image->hdr.ramdisk_size)
-			goto close;
+			goto oops;
 	}
 
 	seek_padding(fd, image->hdr.pagesize, image->hdr.ramdisk_size);
@@ -485,7 +584,7 @@ int load_boot_image(boot_img *image, const char *file)
 	if (image->hdr.second_size) {
 		image->second = malloc(image->hdr.second_size);
 		if (read(fd, image->second, image->hdr.second_size) != (off_t)image->hdr.second_size)
-			goto close;
+			goto oops;
 	}
 
 	seek_padding(fd, image->hdr.pagesize, image->hdr.second_size);
@@ -493,77 +592,19 @@ int load_boot_image(boot_img *image, const char *file)
 	if (image->hdr.dt_size) {
 		image->dt = malloc(image->hdr.dt_size);
 		if (read(fd, image->dt, image->hdr.dt_size) != (off_t)image->hdr.dt_size)
-			goto close;
+			goto oops;
 	}
 
-	ret = 0;
-close:
 	close(fd);
-	return ret;
-}
-
-int create_boot_image(boot_img *image,
-	const char *kernel, const char *ramdisk,
-	const char *second, const char *dt,
-	const char *board, const char *cmdline,
-	int pagesize, uint32_t base,
-	uint32_t kernel_offset, uint32_t ramdisk_offset,
-	uint32_t second_offset, uint32_t tags_offset)
-{
-	memset(image, 0, sizeof(boot_img));
-
-	memcpy(&image->hdr.magic, BOOT_MAGIC, BOOT_MAGIC_SIZE);
-
-	if (!base)
-		base = 0x10000000U;
-	if (!kernel_offset)
-		kernel_offset = 0x00008000U;
-	if (!ramdisk_offset)
-		ramdisk_offset = 0x01000000U;
-	if (!second_offset)
-		second_offset = 0x00F00000U;
-	if (!tags_offset)
-		tags_offset = 0x00000100U;
-
-	image->hdr.kernel_addr  = base + kernel_offset;
-	image->hdr.ramdisk_addr = base + ramdisk_offset;
-	image->hdr.second_addr  = base + second_offset;
-	image->hdr.tags_addr    = base + tags_offset;
-
-	if (bootimg_set_pagesize(image, pagesize))
-		goto oops;
-
-	if (bootimg_set_board(image, board))
-		goto oops;
-
-	if (bootimg_set_cmdline(image, cmdline))
-		goto oops;
-
-	if (bootimg_load_kernel(image, kernel))
-		goto oops;
-
-	if (bootimg_load_ramdisk(image, ramdisk))
-		goto oops;
-
-	if (bootimg_load_second(image, second))
-		goto oops;
-
-	if (bootimg_load_dt(image, dt))
-		goto oops;
-
-	bootimg_update_hash(image);
-
-	return 0;
+	return image;
 oops:
-	free_boot_image(image);
-	return EINVAL;
+	close(fd);
+	return 0;
 }
 
 int write_boot_image(boot_img *image, const char *file)
 {
-	int fd;
-
-	fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, NEW_FILE_PERMISSIONS);
+	int fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, NEW_FILE_PERMISSIONS);
 	if (fd < 0)
 		return EACCES;
 
@@ -578,21 +619,18 @@ int write_boot_image(boot_img *image, const char *file)
 		if (write_padding(fd, image->hdr.pagesize, image->hdr.kernel_size))
 			goto oops;
 	}
-
 	if (image->ramdisk) {
 		if (write(fd, image->ramdisk, image->hdr.ramdisk_size) != (off_t)image->hdr.ramdisk_size)
 			goto oops;
 		if (write_padding(fd, image->hdr.pagesize, image->hdr.ramdisk_size))
 			goto oops;
 	}
-
 	if (image->second) {
 		if (write(fd, image->second, image->hdr.second_size) != (off_t)image->hdr.second_size)
 			goto oops;
 		if (write_padding(fd, image->hdr.pagesize, image->hdr.second_size))
 			goto oops;
 	}
-
 	if (image->dt) {
 		if (write(fd, image->dt, image->hdr.dt_size) != (off_t)image->hdr.dt_size)
 			goto oops;
@@ -619,4 +657,5 @@ void free_boot_image(boot_img *image)
 		free(image->second);
 	if (image->dt)
 		free(image->dt);
+	free(image);
 }

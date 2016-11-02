@@ -61,12 +61,17 @@ struct boot_img_hdr
 
 struct boot_img
 {
-	boot_img_hdr hdr;  /* the boot image header    */
-	byte *kernel;      /* pointer to kernel image  */
-	byte *ramdisk;     /* pointer to ramdisk image */
-	byte *second;      /* pointer to second image  */
-	byte *dt;          /* pointer to dt image      */
-};
+	boot_img_hdr hdr;        /* the boot image header    */
+	byte *kernel;            /* pointer to kernel image  */
+	byte *ramdisk;           /* pointer to ramdisk image */
+	byte *second;            /* pointer to second image  */
+	byte *dt;                /* pointer to dt image      */
+	uint32_t base;           /* base location offsets are relative to */
+	uint32_t kernel_offset;  /* offset of kernel load addr  */
+	uint32_t ramdisk_offset; /* offset of ramdisk load addr */
+	uint32_t second_offset;  /* offset of second load addr  */
+	uint32_t tags_offset;    /* offset of kernel tags       */
+} __attribute__((packed));
 
 /*
 ** +-----------------+ 
@@ -100,25 +105,34 @@ struct boot_img
 
 void bootimg_update_hash(boot_img *image);
 char *bootimg_read_hash(boot_img *image);
-int bootimg_set_pagesize(boot_img *image, const int pagesize);
-int bootimg_set_board(boot_img *image, const char *board);
-int bootimg_set_cmdline(boot_img *image, const char *cmdline);
-int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val);
-int bootimg_delete_cmdline_arg(boot_img *image, const char *arg);
+
 int bootimg_load_kernel(boot_img *image, const char *file);
 int bootimg_load_ramdisk(boot_img *image, const char *file);
 int bootimg_load_second(boot_img *image, const char *file);
 int bootimg_load_dt(boot_img *image, const char *file);
 
-int create_boot_image(boot_img *image,
-	const char *kernel, const char *ramdisk,
-	const char *second, const char *dt,
-	const char *board, const char *cmdline,
-	int pagesize, uint32_t base,
-	uint32_t kernel_offset, uint32_t ramdisk_offset,
-	uint32_t second_offset, uint32_t tags_offset);
+int bootimg_save_kernel(boot_img *image, const char *file);
+int bootimg_save_ramdisk(boot_img *image, const char *file);
+int bootimg_save_second(boot_img *image, const char *file);
+int bootimg_save_dt(boot_img *image, const char *file);
 
-int load_boot_image(boot_img *image, const char *file);
+int bootimg_set_board(boot_img *image, const char *board);
+
+int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val);
+int bootimg_delete_cmdline_arg(boot_img *image, const char *arg);
+int bootimg_set_cmdline(boot_img *image, const char *cmdline);
+
+int bootimg_set_pagesize(boot_img *image, const int pagesize);
+
+void bootimg_set_base(boot_img *image, const uint32_t base);
+void bootimg_set_kernel_offset(boot_img *image, const uint32_t offset);
+void bootimg_set_ramdisk_offset(boot_img *image, const uint32_t offset);
+void bootimg_set_second_offset(boot_img *image, const uint32_t offset);
+void bootimg_set_tags_offset(boot_img *image, const uint32_t offset);
+
+boot_img *new_boot_image(void);
+
+boot_img *load_boot_image(const char *file);
 
 int write_boot_image(boot_img *image, const char *file);
 
