@@ -27,21 +27,11 @@
 /* create new files as 0644 */
 #define NEW_FILE_PERMISSIONS (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
-/* defaults when creating a new boot image */
-#define BOOTIMG_DEFAULT_PAGESIZE       2048
-
-#define BOOTIMG_DEFAULT_BASE           0x10000000U
-#define BOOTIMG_DEFAULT_KERNEL_OFFSET  0x00008000U
-#define BOOTIMG_DEFAULT_RAMDISK_OFFSET 0x01000000U
-#define BOOTIMG_DEFAULT_SECOND_OFFSET  0x00F00000U
-#define BOOTIMG_DEFAULT_TAGS_OFFSET    0x00000100U
-
 static byte padding[131072] = { 0, };
 
 static void seek_padding(const int fd, const int pagesize, const off_t itemsize)
 {
-	int pagemask = pagesize - 1;
-	int count;
+	int count, pagemask = pagesize - 1;
 
 	if ((itemsize & pagemask) == 0)
 		return;
@@ -53,8 +43,7 @@ static void seek_padding(const int fd, const int pagesize, const off_t itemsize)
 
 static int write_padding(const int fd, const int pagesize, const off_t itemsize)
 {
-	int pagemask = pagesize - 1;
-	int count;
+	int count, pagemask = pagesize - 1;
 
 	if ((itemsize & pagemask) == 0)
 		return 0;
@@ -246,19 +235,17 @@ int bootimg_set_board(boot_img *image, const char *board)
 static int cmdline_update(boot_img *image,
 	const char *arg, const char *val, const int delete)
 {
-	int len, append;
-	int larg = 0, lval = 0;
-	int in_quot = 0, arg_found = 0;
+	int append;
+	int len = 0, larg = 0, lval = 0, in_quot = 0, arg_found = 0;
 	char *arg_start = 0, *arg_end = 0, *val_start = 0, *val_end = 0;
 	char *str = (char*)image->hdr.cmdline;
 	char *c = str;
-	if (arg)
+	if (arg && *arg)
 		larg = strlen(arg);
-	if (val)
+	if (val && *val)
 		lval = strlen(val);
 
-	len = strlen(str);
-	if (!len) { /* empty cmdline */
+	if (!*str || !(len = strlen(str))) { /* empty cmdline */
 		if (delete) /* nothing to delete */
 			goto done;
 		goto append_arg;
@@ -426,7 +413,7 @@ int bootimg_set_cmdline(boot_img *image, const char *cmdline)
 		return 0;
 	}
 
-	if (strlen(cmdline) > BOOT_ARGS_SIZE - 1)
+	if (strlen(cmdline) >= BOOT_ARGS_SIZE)
 		return EMSGSIZE;
 
 	strcpy((char*)image->hdr.cmdline, cmdline);
@@ -443,7 +430,7 @@ int bootimg_set_pagesize(boot_img *image, const int pagesize)
 		image->hdr.pagesize = pagesize;
 		return 0;
 	case 0:
-		image->hdr.pagesize = BOOTIMG_DEFAULT_PAGESIZE;
+		image->hdr.pagesize = BOOT_DEFAULT_PAGESIZE;
 		return 0;
 	default:
 		return EINVAL;
@@ -493,14 +480,14 @@ boot_img *new_boot_image(void)
 
 	memcpy(&image->hdr.magic, BOOT_MAGIC, BOOT_MAGIC_SIZE);
 
-	bootimg_set_pagesize(image, BOOTIMG_DEFAULT_PAGESIZE);
+	bootimg_set_pagesize(image, BOOT_DEFAULT_PAGESIZE);
 
-	image->base = BOOTIMG_DEFAULT_BASE;
+	image->base = BOOT_DEFAULT_BASE;
 
-	bootimg_set_kernel_offset(image,  BOOTIMG_DEFAULT_KERNEL_OFFSET);
-	bootimg_set_ramdisk_offset(image, BOOTIMG_DEFAULT_RAMDISK_OFFSET);
-	bootimg_set_second_offset(image,  BOOTIMG_DEFAULT_SECOND_OFFSET);
-	bootimg_set_tags_offset(image,    BOOTIMG_DEFAULT_TAGS_OFFSET);
+	bootimg_set_kernel_offset(image,  BOOT_DEFAULT_KERNEL_OFFSET);
+	bootimg_set_ramdisk_offset(image, BOOT_DEFAULT_RAMDISK_OFFSET);
+	bootimg_set_second_offset(image,  BOOT_DEFAULT_SECOND_OFFSET);
+	bootimg_set_tags_offset(image,    BOOT_DEFAULT_TAGS_OFFSET);
 
 	return image;
 }
@@ -527,8 +514,7 @@ boot_img *load_boot_image(const char *file)
 
 	lseek(fd, i, SEEK_SET);
 
-	image = calloc(1, sizeof(*image));
-	if (!image)
+	if (!(image = calloc(1, sizeof(*image))))
 		return 0;
 
 	if (read(fd, &image->hdr, sizeof(image->hdr)) != sizeof(image->hdr))

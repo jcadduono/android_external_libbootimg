@@ -44,6 +44,7 @@
 /* create new directories as 0755 */
 #define NEW_DIR_PERMISSIONS (S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)
 
+/* modes of operation */
 enum {
 	MODE_NONE,
 	MODE_UNPACK,
@@ -51,74 +52,6 @@ enum {
 	MODE_UPDATE,
 	MODE_INFO
 };
-
-static int write_string_to_file(const char *file, const char *string)
-{
-	int fd, len = strlen(string);
-
-	fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, NEW_FILE_PERMISSIONS);
-	if (fd < 0)
-		return errno;
-
-	if (len && write(fd, string, len) != len)
-		goto oops;
-
-	if (write(fd, "\n", 1) != 1)
-		goto oops;
-
-	close(fd);
-	return 0;
-oops:
-	close(fd);
-	return EIO;
-}
-
-static int read_string_from_file(const char* file, char *buf, off_t len)
-{
-	int fd;
-	char *c;
-	off_t rlen;
-
-	if ((fd = open(file, O_RDONLY)) < 0)
-		return errno;
-
-	rlen = read(fd, buf, len - 1);
-	if (rlen < 0)
-		goto oops;
-
-	*(buf + rlen + 1) = 0;
-
-	if ((c = strchr(buf, '\r')) || (c = strchr(buf, '\n')))
-		*c = 0; /* stop at newline */
-
-	close(fd);
-	return 0;
-oops:
-	close(fd);
-	return EIO;
-}
-
-static char *basename(char const *path)
-{
-	const char *s = strrchr(path, '/');
-	if (!s) {
-		return strdup(path);
-	} else {
-		return strdup(s + 1);
-	}
-}
-
-static char *read_hash(const byte *hash)
-{
-	char *str = malloc(SHA_DIGEST_SIZE * 2 + 1);
-	char *c = str;
-	const byte *h = hash;
-	for (; c < str + SHA_DIGEST_SIZE * 2; h++) {
-		c += sprintf(c, "%02x", *h);
-	}
-	*c = 0;
-	return str;
-}
 
 /* args set by user in command */
 enum
@@ -159,7 +92,70 @@ enum
 	INFO_ACTUALHASH     = 1 << 14
 };
 
-void print_boot_info(boot_img *image, const unsigned info)
+static int write_string_to_file(const char *file, const char *string)
+{
+	int fd, len = strlen(string);
+
+	fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, NEW_FILE_PERMISSIONS);
+	if (fd < 0)
+		return errno;
+
+	if (len && write(fd, string, len) != len)
+		goto oops;
+
+	if (write(fd, "\n", 1) != 1)
+		goto oops;
+
+	close(fd);
+	return 0;
+oops:
+	close(fd);
+	return EIO;
+}
+
+static int read_string_from_file(const char* file, char *buf, off_t len)
+{
+	int fd;
+	char *c;
+	off_t rlen;
+
+	if ((fd = open(file, O_RDONLY)) < 0)
+		return errno;
+
+	rlen = read(fd, buf, len - 1);
+	if (rlen < 0) {
+		close(fd);
+		return EIO;
+	}
+
+	*(buf + rlen + 1) = 0;
+
+	if ((c = strchr(buf, '\r')) || (c = strchr(buf, '\n')))
+		*c = 0; /* stop at newline */
+
+	close(fd);
+	return 0;
+}
+
+static char *basename(char const *path)
+{
+	const char *s = strrchr(path, '/');
+	return strdup(s ? s + 1 : path);
+}
+
+static char *read_hash(const byte *hash)
+{
+	char *str = malloc(SHA_DIGEST_SIZE * 2 + 1);
+	char *c = str;
+	const byte *h = hash;
+	for (; c < str + SHA_DIGEST_SIZE * 2; h++) {
+		c += sprintf(c, "%02x", *h);
+	}
+	*c = 0;
+	return str;
+}
+
+void print_boot_info(const boot_img *image, const unsigned info)
 {
 	char *hash;
 
@@ -187,6 +183,7 @@ void print_boot_info(boot_img *image, const unsigned info)
 		LOGV("BOARD_SECOND_SIZE %u", image->hdr.second_size);
 	if (info & INFO_DT_SIZE)
 		LOGV("BOARD_DT_SIZE %u", image->hdr.dt_size);
+
 	if (info & INFO_HASH) {
 		hash = read_hash((byte*)image->hdr.hash);
 		LOGV("BOARD_HASH 0x%s", hash);
@@ -199,69 +196,76 @@ void print_boot_info(boot_img *image, const unsigned info)
 	}
 }
 
-#define usage(...) { \
-	LOGE("Usage: %s [xvcf] [args...]\n", argv[0]); \
-	LOGE( \
-		" Modes:\n" \
-		"  -x, --unpack        - unpack an Android boot image\n" \
-		"  -c, --create        - create an Android boot image\n" \
-		"  -u, --update        - update an Android boot image\n" \
-		"  -v, -vv, --verbose  - print boot image details\n" \
-	); \
-	LOGE( \
-		" Options: (set value only for create/update mode)\n" \
-		"   [ -k,  --kernel \"kernel\"        ]\n" \
-		"   [ -r,  --ramdisk \"ramdisk\"      ]\n" \
-		"   [ -s,  --second \"second\"        ]\n" \
-		"   [ -d,  --dt \"dt.img\"            ]\n" \
-		"   [ -m,  --board \"board magic\"    ]\n" \
-		"   [ -l,  --cmdline \"boot cmdline\" ]\n" \
-		"   [ -a,  --arg \"cmdline\" \"value\"  ]\n" \
-		"   [ -p,  --pagesize <size>        ]\n" \
-		"   [ -b,  --base <hex>             ]\n" \
-		"   [ -ko, --kernel_offset <hex>    ]\n" \
-		"   [ -ro, --ramdisk_offset <hex>   ]\n" \
-		"   [ -so, --second_offset <hex>    ]\n" \
-		"   [ -to, --tags_offset <hex>      ]\n" \
-		"   [ -h,  --hash                   ]\n" \
-	); \
-	LOGE( \
-		" Unpack:\n" \
-		"     -i,  --input \"boot.img\"\n" \
-		"     -o,  --output \"directory\"\n" \
-		" Create:\n" \
-		"     -o,  --output \"boot.img\"\n" \
-		"     -i,  --input \"directory\"\n" \
-		" Update:\n" \
-		"     -i,  --input \"boot.img\"\n" \
-		"   [ -o,  --output \"boot.img\"      ]\n" \
-	); \
-	LOGE(__VA_ARGS__); \
-	return EINVAL; \
+static void print_usage(const char *app)
+{
+	LOGE("Usage: %s [xvcf] [args...]\n", app);
+	LOGE(
+		" Modes:\n"
+		"  -x, --unpack        - unpack an Android boot image\n"
+		"  -c, --create        - create an Android boot image\n"
+		"  -u, --update        - update an Android boot image\n"
+		"  -v, -vv, --verbose  - print boot image details\n"
+		"  -H, --help          - print usage information\n"
+	);
+	LOGE(
+		" Options: (set value only for create/update mode)\n"
+		"   [ -k,  --kernel \"kernel\"        ]\n"
+		"   [ -r,  --ramdisk \"ramdisk\"      ]\n"
+		"   [ -s,  --second \"second\"        ]\n"
+		"   [ -d,  --dt \"dt.img\"            ]\n"
+		"   [ -m,  --board \"board magic\"    ]\n"
+		"   [ -l,  --cmdline \"boot cmdline\" ]\n"
+		"   [ -a,  --arg \"cmdline\" \"value\"  ]\n"
+		"   [ -p,  --pagesize <size>        ]\n"
+		"   [ -b,  --base <hex>             ]\n"
+		"   [ -ko, --kernel_offset <hex>    ]\n"
+		"   [ -ro, --ramdisk_offset <hex>   ]\n"
+		"   [ -so, --second_offset <hex>    ]\n"
+		"   [ -to, --tags_offset <hex>      ]\n"
+		"   [ -h,  --hash                   ]\n"
+	);
+	LOGE(
+		" Unpack:\n"
+		"     -i,  --input \"boot.img\"\n"
+		"     -o,  --output \"directory\"\n"
+		" Create:\n"
+		"     -o,  --output \"boot.img\"\n"
+		"     -i,  --input \"directory\"\n"
+		" Update:\n"
+		"     -i,  --input \"boot.img\"\n"
+		"   [ -o,  --output \"boot.img\"      ]\n"
+	);
 }
 
+/* returned by any invalid command */
+#define usage(...) { \
+	print_usage(argv[0]); \
+	LOGE(__VA_ARGS__); \
+	ret = EINVAL; \
+	goto free; \
+}
+
+/* shortcuts to reduce code */
 #define specify(item) usage("You need to specify %s!", item)
-#define failto(item, err) { LOGE("Failed to %s: %s", item, strerror(err)); return err; }
+#define failto(item) { LOGE("Failed to %s: %s", item, strerror(ret)); goto free; }
 #define requireval { if (i > argc - 2) usage("%s requires a value in this mode!", argv[i]); }
 #define foundfile(item) { if (verbose > 1) LOGV("Found %s: %s", item, file); }
 
 int main(const int argc, const char** argv)
 {
-	boot_img *image;
+	boot_img *image = 0;
 	struct stat st = {.st_dev = 0};
 	struct dirent *dp;
 	DIR *dfd;
-	char *bname, file[PATH_MAX], buf[1024], hex[16];
-	const char *c,
-		*input = 0, *output = 0,
+	const char *c, *input = 0, *output = 0;
+	char file[PATH_MAX], buf[1024], hex[16], *bname = 0,
 		*kernel = 0, *ramdisk = 0, *second = 0,
 		*dt = 0, *board = 0, *cmdline = 0;
 	uint32_t base = 0,
 		kernel_offset = 0, ramdisk_offset = 0,
 		second_offset = 0, tags_offset = 0;
-	int i, argstart,
-		pagesize = 0, ret = 0,
-		verbose = 0, mode = MODE_NONE;
+	int i, argstart, mode = MODE_NONE,
+		pagesize = 0, ret = 0, verbose = 0;
 	unsigned args = 0, info = 0;
 
 	if (argc < 2)
@@ -308,6 +312,11 @@ int main(const int argc, const char** argv)
 		else
 		if (!strcmp(argv[i], "-vv"))
 			verbose += 2;
+		else
+		if (!strcmp(argv[i], "-H") || !strcmp(argv[i], "--help")) {
+			print_usage(argv[0]);
+			return 0;
+		}
 	}
 
 	if (mode == MODE_NONE && verbose)
@@ -339,7 +348,7 @@ int main(const int argc, const char** argv)
 			case MODE_CREATE:
 			case MODE_UPDATE:
 				requireval;
-				kernel = argv[++i];
+				kernel = strdup(argv[++i]);
 			}
 		} else
 		if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--ramdisk")) {
@@ -348,7 +357,7 @@ int main(const int argc, const char** argv)
 			case MODE_CREATE:
 			case MODE_UPDATE:
 				requireval;
-				ramdisk = argv[++i];
+				ramdisk = strdup(argv[++i]);
 			}
 		} else
 		if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--second")) {
@@ -357,7 +366,7 @@ int main(const int argc, const char** argv)
 			case MODE_CREATE:
 			case MODE_UPDATE:
 				requireval;
-				second = argv[++i];
+				second = strdup(argv[++i]);
 			}
 		} else
 		if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--dt")) {
@@ -366,7 +375,7 @@ int main(const int argc, const char** argv)
 			case MODE_CREATE:
 			case MODE_UPDATE:
 				requireval;
-				dt = argv[++i];
+				dt = strdup(argv[++i]);
 			}
 		} else
 		if (!strcmp(argv[i], "-m") || !strcmp(argv[i], "--magic")
@@ -376,7 +385,7 @@ int main(const int argc, const char** argv)
 			case MODE_CREATE:
 			case MODE_UPDATE:
 				requireval;
-				board = argv[++i];
+				board = strdup(argv[++i]);
 			}
 		} else
 		if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--cmdline")) {
@@ -385,7 +394,7 @@ int main(const int argc, const char** argv)
 			case MODE_CREATE:
 			case MODE_UPDATE:
 				requireval;
-				cmdline = argv[++i];
+				cmdline = strdup(argv[++i]);
 			}
 		} else
 		if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--pagesize")) {
@@ -501,7 +510,7 @@ int main(const int argc, const char** argv)
 		goto update;
 	}
 
-	return 0; /* this should never be reached */
+	goto free; /* this should never be reached, ret = 0 */
 
 info:
 	if (!input)
@@ -510,16 +519,16 @@ info:
 	if (mode == MODE_UNPACK && !output)
 		specify("an output directory");
 
-	if (mode == MODE_UNPACK && !stat(output, &st) && !S_ISDIR(st.st_mode))
-		failto("create output directory", ENOTDIR);
+	if (mode == MODE_UNPACK && !stat(output, &st)
+	 && !S_ISDIR(st.st_mode) && (ret = ENOTDIR))
+		failto("create output directory");
 
-	image = load_boot_image(input);
-	if (!image)
-		failto("load boot image", EINVAL);
+	if (!(image = load_boot_image(input)) && (ret = EINVAL))
+		failto("load boot image");
 
 	if (mode == MODE_UNPACK && !S_ISDIR(st.st_mode)
-		 && mkdir(output, NEW_DIR_PERMISSIONS))
-		failto("create output directory", errno);
+	 && mkdir(output, NEW_DIR_PERMISSIONS) && (ret = errno))
+		failto("create output directory");
 
 	if (!verbose)
 		goto unpack;
@@ -555,62 +564,61 @@ info:
 unpack:
 	bname = basename(input);
 
-	if (args & ARG_BOARD || !args) {
-		sprintf(file, "%s/%s-board", output, bname);
+	if (!args || args & ARG_BOARD) {
+		sprintf(file, "%s/%s-%s", output, bname, "board");
 		write_string_to_file(file, (char*)image->hdr.board);
 	}
-	if (args & ARG_CMDLINE || !args) {
-		sprintf(file, "%s/%s-cmdline", output, bname);
+	if (!args || args & ARG_CMDLINE) {
+		sprintf(file, "%s/%s-%s", output, bname, "cmdline");
 		write_string_to_file(file, (char*)image->hdr.cmdline);
 	}
-	if (args & ARG_PAGESIZE || !args) {
-		sprintf(file, "%s/%s-pagesize", output, bname);
+	if (!args || args & ARG_PAGESIZE) {
+		sprintf(file, "%s/%s-%s", output, bname, "pagesize");
 		sprintf(hex, "%u", image->hdr.pagesize);
 		write_string_to_file(file, hex);
 	}
-	if (args & ARG_BASE || !args) {
-		sprintf(file, "%s/%s-base", output, bname);
+	if (!args || args & ARG_BASE) {
+		sprintf(file, "%s/%s-%s", output, bname, "base");
 		sprintf(hex, "%08X", image->base);
 		write_string_to_file(file, hex);
 	}
-	if (args & ARG_KERNEL_OFFSET || !args) {
-		sprintf(file, "%s/%s-kernel_offset", output, bname);
+	if (!args || args & ARG_KERNEL_OFFSET) {
+		sprintf(file, "%s/%s-%s", output, bname, "kernel_offset");
 		sprintf(hex, "%08X", image->kernel_offset);
 		write_string_to_file(file, hex);
 	}
-	if (args & ARG_RAMDISK_OFFSET || !args) {
-		sprintf(file, "%s/%s-ramdisk_offset", output, bname);
+	if (!args || args & ARG_RAMDISK_OFFSET) {
+		sprintf(file, "%s/%s-%s", output, bname, "ramdisk_offset");
 		sprintf(hex, "%08X", image->ramdisk_offset);
 		write_string_to_file(file, hex);
 	}
-	if (args & ARG_SECOND_OFFSET || !args) {
-		sprintf(file, "%s/%s-second_offset", output, bname);
+	if (!args || args & ARG_SECOND_OFFSET) {
+		sprintf(file, "%s/%s-%s", output, bname, "second_offset");
 		sprintf(hex, "%08X", image->second_offset);
 		write_string_to_file(file, hex);
 	}
-	if (args & ARG_TAGS_OFFSET || !args) {
-		sprintf(file, "%s/%s-tags_offset", output, bname);
+	if (!args || args & ARG_TAGS_OFFSET) {
+		sprintf(file, "%s/%s-%s", output, bname, "tags_offset");
 		sprintf(hex, "%08X", image->tags_offset);
 		write_string_to_file(file, hex);
 	}
-	if (args & ARG_KERNEL || !args) {
-		sprintf(file, "%s/%s-kernel", output, bname);
+	if (!args || args & ARG_KERNEL) {
+		sprintf(file, "%s/%s-%s", output, bname, "kernel");
 		bootimg_save_kernel(image, file);
 	}
-	if (args & ARG_RAMDISK || !args) {
-		sprintf(file, "%s/%s-ramdisk", output, bname);
+	if (!args || args & ARG_RAMDISK) {
+		sprintf(file, "%s/%s-%s", output, bname, "ramdisk");
 		bootimg_save_ramdisk(image, file);
 	}
-	if (args & ARG_SECOND || !args) {
-		sprintf(file, "%s/%s-second", output, bname);
+	if (!args || args & ARG_SECOND) {
+		sprintf(file, "%s/%s-%s", output, bname, "second");
 		bootimg_save_second(image, file);
 	}
-	if (args & ARG_DT || !args) {
-		sprintf(file, "%s/%s-dt", output, bname);
+	if (!args || args & ARG_DT) {
+		sprintf(file, "%s/%s-%s", output, bname, "dt");
 		bootimg_save_dt(image, file);
 	}
 
-	free(bname);
 	goto free;
 
 create:
@@ -622,8 +630,8 @@ create:
 	if (!input)
 		goto modify;
 
-	if (!(dfd = opendir(input)))
-		failto("open boot image directory", errno);
+	if (!(dfd = opendir(input)) && (ret = errno))
+		failto("open boot image directory");
 
 	while ((dp = readdir(dfd))) {
 		if (!(c = strrchr(dp->d_name, '-')))
@@ -636,8 +644,7 @@ create:
 			if (read_string_from_file(file, buf, sizeof(buf)))
 				continue;
 			foundfile("board");
-			if (!(board = strdup(buf)))
-				continue;
+			board = strdup(buf);
 			args |= ARG_BOARD;
 			continue;
 		}
@@ -645,8 +652,7 @@ create:
 			if (read_string_from_file(file, buf, sizeof(buf)))
 				continue;
 			foundfile("cmdline");
-			if (!(cmdline = strdup(buf)))
-				continue;
+			cmdline = strdup(buf);
 			args |= ARG_CMDLINE;
 			continue;
 		}
@@ -700,29 +706,25 @@ create:
 		}
 		if (!(args & ARG_KERNEL) && !strcmp(c, "kernel")) {
 			foundfile("kernel");
-			if (!(kernel = strdup(file)))
-				continue;
+			kernel = strdup(file);
 			args |= ARG_KERNEL;
 			continue;
 		}
 		if (!(args & ARG_RAMDISK) && !strcmp(c, "ramdisk")) {
 			foundfile("ramdisk");
-			if (!(ramdisk = strdup(file)))
-				continue;
+			ramdisk = strdup(file);
 			args |= ARG_RAMDISK;
 			continue;
 		}
 		if (!(args & ARG_SECOND) && !strcmp(c, "second")) {
 			foundfile("second");
-			if (!(second = strdup(file)))
-				continue;
+			second = strdup(file);
 			args |= ARG_SECOND;
 			continue;
 		}
 		if (!(args & ARG_DT) && !strcmp(c, "dt")) {
 			foundfile("dt");
-			if (!(dt = strdup(file)))
-				continue;
+			dt = strdup(file);
 			args |= ARG_DT;
 			continue;
 		}
@@ -739,8 +741,8 @@ update:
 		specify("an input boot image");
 
 	image = load_boot_image(input);
-	if (!image)
-		failto("load boot image", ENOENT);
+	if (!image && (ret = ENOENT))
+		failto("load boot image");
 
 	if (!output)
 		output = input;
@@ -758,79 +760,49 @@ modify:
 	if (args & ARG_TAGS_OFFSET)
 		bootimg_set_tags_offset(image, tags_offset);
 
-	if (args & ARG_PAGESIZE) {
-		ret = bootimg_set_pagesize(image, pagesize);
-		if (ret) {
-			free_boot_image(image);
-			failto("set page size", ret);
-		}
-	}
+	if (args & ARG_PAGESIZE
+	 && (ret = bootimg_set_pagesize(image, pagesize)))
+		failto("set page size");
 
-	if (args & ARG_BOARD) {
-		ret = bootimg_set_board(image, board);
-		if (ret) {
-			free_boot_image(image);
-			failto("set board magic", ret);
-		}
-	}
+	if (args & ARG_BOARD
+	 && (ret = bootimg_set_board(image, board)))
+		failto("set board magic");
 
-	if (args & ARG_CMDLINE) {
-		ret = bootimg_set_cmdline(image, cmdline);
-		if (ret) {
-			free_boot_image(image);
-			failto("set cmdline", ret);
-		}
-	}
+	if (args & ARG_CMDLINE
+	 && (ret = bootimg_set_cmdline(image, cmdline)))
+		failto("set cmdline");
 
 	if (args & ARG_CMDLINE_ARG) {
 		for (i = argstart; i < argc; i++) {
-			if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--arg")) {
-				i++;
-				if (!strcmp(argv[i + 1], "-"))
-					ret = bootimg_delete_cmdline_arg(image, argv[i]);
-				else
-					ret = bootimg_set_cmdline_arg(image, argv[i], argv[i + 1]);
-				if (ret) {
-					free_boot_image(image);
-					failto("set cmdline argument", ret);
-				}
-				i++;
-			}
+			if (strcmp(argv[i], "-a") && strcmp(argv[i], "--arg"))
+				continue;
+			i++;
+			if (!strcmp(argv[i + 1], "-"))
+				ret = bootimg_delete_cmdline_arg(image, argv[i]);
+			else
+				ret = bootimg_set_cmdline_arg(image, argv[i], argv[i + 1]);
+			if (ret)
+				failto("set cmdline argument");
+			i++;
 		}
 		info |= INFO_CMDLINE;
 	}
 
-	if (args & ARG_KERNEL) {
-		ret = bootimg_load_kernel(image, kernel);
-		if (ret) {
-			free_boot_image(image);
-			failto("load kernel image", ret);
-		}
-	}
+	if (args & ARG_KERNEL
+	 && (ret = bootimg_load_kernel(image, kernel)))
+		failto("load kernel image");
 
-	if (args & ARG_RAMDISK) {
-		ret = bootimg_load_ramdisk(image, ramdisk);
-		if (ret) {
-			free_boot_image(image);
-			failto("load ramdisk image", ret);
-		}
-	}
+	if (args & ARG_RAMDISK
+	 && (ret = bootimg_load_ramdisk(image, ramdisk)))
+		failto("load ramdisk image");
 
-	if (args & ARG_SECOND) {
-		ret = bootimg_load_second(image, second);
-		if (ret) {
-			free_boot_image(image);
-			failto("load second image", ret);
-		}
-	}
+	if (args & ARG_SECOND
+	 && (ret = bootimg_load_second(image, second)))
+		failto("load second image");
 
-	if (args & ARG_DT) {
-		ret = bootimg_load_dt(image, dt);
-		if (ret) {
-			free_boot_image(image);
-			failto("load dt image", ret);
-		}
-	}
+	if (args & ARG_DT
+	 && (ret = bootimg_load_dt(image, dt)))
+		failto("load dt image");
 
 	if (args & ARG_HASH) {
 		bootimg_update_hash(image);
@@ -840,11 +812,24 @@ modify:
 	if (verbose)
 		print_boot_info(image, info);
 
-	ret = write_boot_image(image, output);
-	if (ret)
-		failto("write boot image", ret);
+	if ((ret = write_boot_image(image, output)))
+		failto("write boot image");
 
 free:
+	if (bname)
+		free(bname);
+	if (board)
+		free(board);
+	if (cmdline)
+		free(cmdline);
+	if (kernel)
+		free(kernel);
+	if (ramdisk)
+		free(ramdisk);
+	if (second)
+		free(second);
+	if (dt)
+		free(dt);
 	free_boot_image(image);
 	return ret;
 }

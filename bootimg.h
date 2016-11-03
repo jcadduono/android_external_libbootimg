@@ -32,6 +32,14 @@ typedef unsigned char byte;
 #define BOOT_HASH_SIZE 20
 #define BOOT_RESERVED_SIZE 12
 
+/* defaults when creating a new boot image */
+#define BOOT_DEFAULT_PAGESIZE       2048
+#define BOOT_DEFAULT_BASE           0x10000000U
+#define BOOT_DEFAULT_KERNEL_OFFSET  0x00008000U
+#define BOOT_DEFAULT_RAMDISK_OFFSET 0x01000000U
+#define BOOT_DEFAULT_SECOND_OFFSET  0x00F00000U
+#define BOOT_DEFAULT_TAGS_OFFSET    0x00000100U
+
 struct boot_img_hdr
 {
 	byte magic[BOOT_MAGIC_SIZE];
