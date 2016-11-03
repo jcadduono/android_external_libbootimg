@@ -21,6 +21,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <limits.h>
+#include <dirent.h>
 #include <sys/stat.h>
 
 #include "bootimg.h"
@@ -51,22 +52,50 @@ enum {
 	MODE_INFO
 };
 
-static int write_string_to_file(const char* file, const char* string)
+static int write_string_to_file(const char *file, const char *string)
 {
 	int fd, len = strlen(string);
 
 	fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, NEW_FILE_PERMISSIONS);
 	if (fd < 0)
-		return EACCES;
+		return errno;
 
 	if (len && write(fd, string, len) != len)
-		return EIO;
+		goto oops;
 
 	if (write(fd, "\n", 1) != 1)
-		return EIO;
+		goto oops;
 
 	close(fd);
 	return 0;
+oops:
+	close(fd);
+	return EIO;
+}
+
+static int read_string_from_file(const char* file, char *buf, off_t len)
+{
+	int fd;
+	char *c;
+	off_t rlen;
+
+	if ((fd = open(file, O_RDONLY)) < 0)
+		return errno;
+
+	rlen = read(fd, buf, len - 1);
+	if (rlen < 0)
+		goto oops;
+
+	*(buf + rlen + 1) = 0;
+
+	if ((c = strchr(buf, '\r')) || (c = strchr(buf, '\n')))
+		*c = 0; // stop at newline
+
+	close(fd);
+	return 0;
+oops:
+	close(fd);
+	return EIO;
 }
 
 static char *basename(char const *path)
@@ -211,12 +240,15 @@ void print_boot_info(boot_img *image, const unsigned info)
 #define specify(item) usage("You need to specify %s!", item)
 #define failto(item, err) { LOGE("Failed to %s: %s", item, strerror(err)); return err; }
 #define requireval { if (i > argc - 2) usage("%s requires a value in this mode!", argv[i]); }
+#define foundfile(item) { if (verbose > 1) LOGV("Found %s: %s", item, file); }
 
 int main(const int argc, const char** argv)
 {
 	boot_img *image;
 	struct stat st = {0,};
-	char *bname, file[PATH_MAX], hex[16];
+	struct dirent *dp;
+	DIR *dfd;
+	char *bname, file[PATH_MAX], buf[1024], hex[16];
 	const char *c,
 		*input = 0, *output = 0,
 		*kernel = 0, *ramdisk = 0, *second = 0,
@@ -452,7 +484,7 @@ int main(const int argc, const char** argv)
 	}
 
 	if (verbose > 1)
-		info = -1; // turn them all on!
+		info = -1 - INFO_ACTUALHASH; // turn them all on!
 	else
 		info = args;
 
@@ -587,7 +619,116 @@ create:
 	if (!input)
 		goto modify;
 
-	// handle input directory....
+	if (!(dfd = opendir(input)))
+		failto("open boot image directory", errno);
+
+	while ((dp = readdir(dfd))) {
+		if (!(c = strrchr(dp->d_name, '-')))
+			continue;
+		sprintf(file, "%s/%s", input, dp->d_name);
+		if (stat(file, &st) || !S_ISREG(st.st_mode))
+			continue;
+		c++;
+		if (!(args & ARG_BOARD) && !strcmp(c, "board")) {
+			if (read_string_from_file(file, buf, sizeof(buf)))
+				continue;
+			foundfile("board");
+			if (!(board = strdup(buf)))
+				continue;
+			args |= ARG_BOARD;
+			continue;
+		}
+		if (!(args & ARG_CMDLINE) && !strcmp(c, "cmdline")) {
+			if (read_string_from_file(file, buf, sizeof(buf)))
+				continue;
+			foundfile("cmdline");
+			if (!(cmdline = strdup(buf)))
+				continue;
+			args |= ARG_CMDLINE;
+			continue;
+		}
+		if (!(args & ARG_PAGESIZE) && !strcmp(c, "pagesize")) {
+			if (read_string_from_file(file, buf, sizeof(buf)))
+				continue;
+			foundfile("pagesize");
+			pagesize = strtoul(buf, 0, 10);
+			args |= ARG_PAGESIZE;
+			continue;
+		}
+		if (!(args & ARG_BASE) && !strcmp(c, "base")) {
+			if (read_string_from_file(file, buf, sizeof(buf)))
+				continue;
+			foundfile("base");
+			base = strtoul(buf, 0, 16);
+			args |= ARG_BASE;
+			continue;
+		}
+		if (!(args & ARG_KERNEL_OFFSET) && !strcmp(c, "kernel_offset")) {
+			if (read_string_from_file(file, buf, sizeof(buf)))
+				continue;
+			foundfile("kernel_offset");
+			kernel_offset = strtoul(buf, 0, 16);
+			args |= ARG_KERNEL_OFFSET;
+			continue;
+		}
+		if (!(args & ARG_RAMDISK_OFFSET) && !strcmp(c, "ramdisk_offset")) {
+			if (read_string_from_file(file, buf, sizeof(buf)))
+				continue;
+			foundfile("ramdisk_offset");
+			ramdisk_offset = strtoul(buf, 0, 16);
+			args |= ARG_RAMDISK_OFFSET;
+			continue;
+		}
+		if (!(args & ARG_SECOND_OFFSET) && !strcmp(c, "second_offset")) {
+			if (read_string_from_file(file, buf, sizeof(buf)))
+				continue;
+			foundfile("second_offset");
+			second_offset = strtoul(buf, 0, 16);
+			args |= ARG_SECOND_OFFSET;
+			continue;
+		}
+		if (!(args & ARG_TAGS_OFFSET) && !strcmp(c, "tags_offset")) {
+			if (read_string_from_file(file, buf, sizeof(buf)))
+				continue;
+			foundfile("tags_offset");
+			tags_offset = strtoul(buf, 0, 16);
+			args |= ARG_TAGS_OFFSET;
+			continue;
+		}
+		if (!(args & ARG_KERNEL) && !strcmp(c, "kernel")) {
+			foundfile("kernel");
+			if (!(kernel = strdup(file)))
+				continue;
+			args |= ARG_KERNEL;
+			continue;
+		}
+		if (!(args & ARG_RAMDISK) && !strcmp(c, "ramdisk")) {
+			foundfile("ramdisk");
+			if (!(ramdisk = strdup(file)))
+				continue;
+			args |= ARG_RAMDISK;
+			continue;
+		}
+		if (!(args & ARG_SECOND) && !strcmp(c, "second")) {
+			foundfile("second");
+			if (!(second = strdup(file)))
+				continue;
+			args |= ARG_SECOND;
+			continue;
+		}
+		if (!(args & ARG_DT) && !strcmp(c, "dt")) {
+			foundfile("dt");
+			if (!(dt = strdup(file)))
+				continue;
+			args |= ARG_DT;
+			continue;
+		}
+	}
+
+	closedir(dfd);
+
+	info |= args;
+
 	goto modify;
 
 update:
@@ -688,8 +829,10 @@ modify:
 		}
 	}
 
-	if (args & ARG_HASH)
+	if (args & ARG_HASH) {
 		bootimg_update_hash(image);
+		info |= INFO_HASH;
+	}
 
 	if (verbose)
 		print_boot_info(image, info);

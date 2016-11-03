@@ -452,6 +452,7 @@ int bootimg_set_pagesize(boot_img *image, const int pagesize)
 
 void bootimg_set_base(boot_img *image, const uint32_t base)
 {
+	image->base = base;
 	image->hdr.kernel_addr  = base + image->kernel_offset;
 	image->hdr.ramdisk_addr = base + image->ramdisk_offset;
 	image->hdr.second_addr  = base + image->second_offset;
@@ -492,14 +493,14 @@ boot_img *new_boot_image(void)
 
 	memcpy(&image->hdr.magic, BOOT_MAGIC, BOOT_MAGIC_SIZE);
 
+	bootimg_set_pagesize(image, BOOTIMG_DEFAULT_PAGESIZE);
+
 	image->base = BOOTIMG_DEFAULT_BASE;
 
 	bootimg_set_kernel_offset(image,  BOOTIMG_DEFAULT_KERNEL_OFFSET);
 	bootimg_set_ramdisk_offset(image, BOOTIMG_DEFAULT_RAMDISK_OFFSET);
 	bootimg_set_second_offset(image,  BOOTIMG_DEFAULT_SECOND_OFFSET);
 	bootimg_set_tags_offset(image,    BOOTIMG_DEFAULT_TAGS_OFFSET);
-
-	bootimg_set_pagesize(image, BOOTIMG_DEFAULT_PAGESIZE);
 
 	return image;
 }
