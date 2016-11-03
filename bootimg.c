@@ -564,6 +564,8 @@ info:
 unpack:
 	bname = basename(input);
 
+	args &= ~ARG_HASH; /* so --hash doesn't extract nothing */
+
 	if (!args || args & ARG_BOARD) {
 		sprintf(file, "%s/%s-%s", output, bname, "board");
 		write_string_to_file(file, (char*)image->hdr.board);
