@@ -258,22 +258,22 @@ static int cmdline_update(boot_img *image,
 		lval = strlen(val);
 
 	len = strlen(str);
-	if (!len) { // empty cmdline
-		if (delete) // nothing to delete
+	if (!len) { /* empty cmdline */
+		if (delete) /* nothing to delete */
 			goto done;
 		goto append_arg;
 	}
 
 	for (;; c++) {
 		switch (*c) {
-		case 0: // end of the line
+		case 0: /* end of the line */
 			in_quot = 0;
 			goto parse_arg;
 		case ' ':
 		case '\t':
 			if (in_quot)
 				continue;
-			if (!arg_start) { // remove unnecessary padding
+			if (!arg_start) { /* remove unnecessary padding */
 				switch (*(c + 1)) {
 				case 0:
 					*c-- = 0;
@@ -284,7 +284,7 @@ static int cmdline_update(boot_img *image,
 					break;
 				default:
 					if (*c == '\t')
-						*c = ' '; // replace tab delimiters with spaces
+						*c = ' '; /* replace tab delimiters with spaces */
 					if (c != str)
 						continue;
 				}
@@ -301,14 +301,14 @@ static int cmdline_update(boot_img *image,
 			}
 			continue;
 		case '"':
-			if (c == str || *(c - 1) != '\\') // skip escaped quotes
+			if (c == str || *(c - 1) != '\\') /* skip escaped quotes */
 				in_quot = !in_quot;
 		default:
 			if (!arg_start)
 				arg_start = c;
 			continue;
 		}
-		// if we reach here, we're at the end of a val or arg has no val
+		/* if we reach here, we're at the end of a val or arg has no val */
 parse_arg:
 		if (!arg_start)
 			goto next_arg;
@@ -318,13 +318,13 @@ parse_arg:
 		else
 			arg_end = c;
 
-		if (!arg) // no arg means just a cleanup
+		if (!arg) /* no arg means just a cleanup */
 			goto next_arg;
 
-		if (larg != (arg_end - arg_start)) // does not match size of arg
+		if (larg != (arg_end - arg_start)) /* does not match size of arg */
 			goto next_arg;
 
-		if (memcmp(arg_start, arg, larg)) // does not match arg
+		if (memcmp(arg_start, arg, larg)) /* does not match arg */
 			goto next_arg;
 
 		arg_found = 1;
@@ -332,35 +332,35 @@ parse_arg:
 		if (delete)
 			goto delete_arg;
 
-		if (!lval) { // keep arg, remove value
-			if (!val_end) // already no value
+		if (!lval) { /* keep arg, remove value */
+			if (!val_end) /* already no value */
 				goto next_arg;
-			memmove(arg_end, val_end, strlen(val_end) + 1); // move val_end -> null to arg_end
+			memmove(arg_end, val_end, strlen(val_end) + 1); /* move val_end -> null to arg_end */
 			c = arg_end;
 			len -= (val_end - arg_end);
 			goto next_arg;
 		}
 
-		if (lval == (val_end - val_start)) { // value sizes match
-			// well, isn't this convenient!
+		if (lval == (val_end - val_start)) { /* value sizes match */
+			/* well, isn't this convenient! */
 			memcpy(val_start, val, lval);
 			goto next_arg;
 		}
 
-		// replace the arg value
-		// it's much easier to just delete the argument and append it (cheating, i know ;)!)
+		/* replace the arg value */
+		/* it's much easier to just delete the argument and append it (cheating, i know ;)!) */
 		arg_found = 0;
 delete_arg:
-		// shift the rest of the command line left over the arg
+		/* shift the rest of the command line left over the arg */
 		if (val_end)
 			arg_end = val_end;
 		if (arg_start > str && *(arg_start - 1) == ' ')
-			arg_start--; // remove space before the arg
-		memmove(arg_start, arg_end, strlen(arg_end) + 1); // move arg_end -> null to arg_start
+			arg_start--; /* remove space before the arg */
+		memmove(arg_start, arg_end, strlen(arg_end) + 1); /* move arg_end -> null to arg_start */
 		c = arg_start;
 		len -= (arg_end - arg_start);
 next_arg:
-		// we need to reset them
+		/* we need to reset them */
 		arg_start = arg_end = val_start = val_end = 0;
 		if (!*c) {
 			if (delete)
@@ -375,33 +375,33 @@ append_arg:
 	if (!larg)
 		goto done;
 
-	// calculate length required for append
+	/* calculate length required for append */
 	append = larg;
 	if (lval)
-		append += lval + 1; // =val
+		append += lval + 1; /* =val */
 	if (len)
-		append++; // space before arg
-	append++; // null terminator
+		append++; /* space before arg */
+	append++; /* null terminator */
 
 	if (len + append > BOOT_ARGS_SIZE)
-		goto oops; // can't fit new arg/val on cmdline
+		goto oops; /* can't fit new arg/val on cmdline */
 
-	if (len) // add a space
+	if (len) /* add a space */
 		*(c++) = ' ';
 
-	// add arg
+	/* add arg */
 	memcpy(c, arg, larg);
 	c += larg;
 
 	if (!lval)
 		goto done;
 
-	// add =val
+	/* add =val */
 	*(c++) = '=';
 	memcpy(c, val, lval);
 	c += lval;
 done:
-	// fill the remaining space with null
+	/* fill the remaining space with null */
 	memset(c, 0, BOOT_ARGS_SIZE - (c - str));
 	return 0;
 oops:

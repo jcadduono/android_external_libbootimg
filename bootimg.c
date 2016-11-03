@@ -38,10 +38,10 @@
 #define LOGE(...) { fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); }
 #endif
 
-// create new files as 0644
+/* create new files as 0644 */
 #define NEW_FILE_PERMISSIONS (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
-// create new directories as 0755
+/* create new directories as 0755 */
 #define NEW_DIR_PERMISSIONS (S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)
 
 enum {
@@ -89,7 +89,7 @@ static int read_string_from_file(const char* file, char *buf, off_t len)
 	*(buf + rlen + 1) = 0;
 
 	if ((c = strchr(buf, '\r')) || (c = strchr(buf, '\n')))
-		*c = 0; // stop at newline
+		*c = 0; /* stop at newline */
 
 	close(fd);
 	return 0;
@@ -136,7 +136,7 @@ enum
 	ARG_SECOND          = 1 << 10,
 	ARG_DT              = 1 << 11,
 	ARG_HASH            = 1 << 12,
-	ARG_CMDLINE_ARG     = 1 << 13,
+	ARG_CMDLINE_ARG     = 1 << 13
 };
 
 /* match arg flags (for verbose output) */
@@ -155,8 +155,8 @@ enum
 	INFO_SECOND_SIZE    = 1 << 10,
 	INFO_DT_SIZE        = 1 << 11,
 	INFO_HASH           = 1 << 12,
-	// ARG_CMDLINE_ARG  = 1 << 13,
-	INFO_ACTUALHASH     = 1 << 14,
+	/* ARG_CMDLINE_ARG  = 1 << 13, */
+	INFO_ACTUALHASH     = 1 << 14
 };
 
 void print_boot_info(boot_img *image, const unsigned info)
@@ -207,7 +207,8 @@ void print_boot_info(boot_img *image, const unsigned info)
 		"  -c, --create        - create an Android boot image\n" \
 		"  -u, --update        - update an Android boot image\n" \
 		"  -v, -vv, --verbose  - print boot image details\n" \
-		"\n" \
+	); \
+	LOGE( \
 		" Options: (set value only for create/update mode)\n" \
 		"   [ -k,  --kernel \"kernel\"        ]\n" \
 		"   [ -r,  --ramdisk \"ramdisk\"      ]\n" \
@@ -223,6 +224,8 @@ void print_boot_info(boot_img *image, const unsigned info)
 		"   [ -so, --second_offset <hex>    ]\n" \
 		"   [ -to, --tags_offset <hex>      ]\n" \
 		"   [ -h,  --hash                   ]\n" \
+	); \
+	LOGE( \
 		" Unpack:\n" \
 		"     -i,  --input \"boot.img\"\n" \
 		"     -o,  --output \"directory\"\n" \
@@ -245,7 +248,7 @@ void print_boot_info(boot_img *image, const unsigned info)
 int main(const int argc, const char** argv)
 {
 	boot_img *image;
-	struct stat st = {0,};
+	struct stat st = {.st_dev = 0};
 	struct dirent *dp;
 	DIR *dfd;
 	char *bname, file[PATH_MAX], buf[1024], hex[16];
@@ -264,7 +267,7 @@ int main(const int argc, const char** argv)
 	if (argc < 2)
 		usage("Not enough arguments!");
 
-	// tar style argument parsing (only valid in first arg)
+	/* tar style argument parsing (only valid in first arg) */
 	for (argstart = 2, c = argv[1]; *c; c++) {
 		switch (*c) {
 		case '-':
@@ -289,7 +292,7 @@ int main(const int argc, const char** argv)
 		break;
 	}
 
-	// handle mode changes so next section can parse args in the right mode
+	/* handle mode changes so next section can parse args in the right mode */
 	for (i = argstart; i < argc; i++) {
 		if (!strcmp(argv[i], "-x") || !strcmp(argv[i], "--unpack"))
 			mode = MODE_UNPACK;
@@ -318,7 +321,7 @@ int main(const int argc, const char** argv)
 		 || !strcmp(argv[i], "-c") || !strcmp(argv[i], "--create")
 		 || !strcmp(argv[i], "-u") || !strcmp(argv[i], "--update")
 		 || !strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
-			// do nothing, we already handled these args
+			/* do nothing, we already handled these args */
 		} else
 		if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--input")) {
 			requireval;
@@ -453,12 +456,12 @@ int main(const int argc, const char** argv)
 			case MODE_UPDATE:
 				if (i > argc - 3)
 					usage("%s requires both an argument and a value!", argv[i]);
-				i += 2; // we should handle this in update section
+				i += 2; /* we should handle this in update section */
 				continue;
 			}
 			usage("You can only use %s in update/create mode!", argv[i]);
 		} else
-		{ // if it's not an argument, it's either an input or output
+		{ /* if it's not an argument, it's either an input or output */
 			switch (mode) {
 			case MODE_CREATE:
 				if (!output) {
@@ -484,7 +487,7 @@ int main(const int argc, const char** argv)
 	}
 
 	if (verbose > 1)
-		info = -1 - INFO_ACTUALHASH; // turn them all on!
+		info = -1 - INFO_ACTUALHASH; /* turn them all on! */
 	else
 		info = args;
 
@@ -498,7 +501,7 @@ int main(const int argc, const char** argv)
 		goto update;
 	}
 
-	return 0; // this should never be reached
+	return 0; /* this should never be reached */
 
 info:
 	if (!input)
@@ -547,7 +550,7 @@ info:
 
 	if (mode == MODE_INFO)
 		goto free;
-	// otherwise continue to unpack
+	/* otherwise continue to unpack */
 
 unpack:
 	bname = basename(input);
@@ -742,7 +745,7 @@ update:
 	if (!output)
 		output = input;
 
-	// continue through modify
+	/* continue through modify */
 modify:
 	if (args & ARG_BASE)
 		bootimg_set_base(image, base);
