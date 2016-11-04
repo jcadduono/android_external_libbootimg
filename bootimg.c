@@ -205,7 +205,7 @@ void print_boot_info(const boot_img *image, const unsigned info)
 
 static void print_usage(const char *app)
 {
-	LOGE("Usage: %s [xvcf] [args...]\n", app);
+	LOGE("Usage: %s [xcuvvf] [args...]\n", app);
 	LOGE(
 		" Modes:\n"
 		"  -x, --unpack        - unpack an Android boot image\n"

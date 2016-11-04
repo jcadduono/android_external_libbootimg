@@ -18,5 +18,5 @@ libbootimg.dll: $(LIBBOOTIMG_SRC)
 	$(MINGW32)-gcc $(CFLAGS) $(LDFLAGS) -shared -Wl,--out-implib,libbootimg_dll.a $^ -o $@
 
 clean:
-	$(RM) -f bootimg *.exe *.dll *.a *.o
+	$(RM) -v bootimg *.exe *.dll *.a *.o
 
