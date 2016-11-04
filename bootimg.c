@@ -44,6 +44,13 @@
 /* create new directories as 0755 */
 #define NEW_DIR_PERMISSIONS (S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)
 
+/* mingw32-gcc compatibility */
+#if defined(_WIN32) || defined(__WIN32__)
+#define mkdir(A, B) mkdir(A)
+#else
+#define O_BINARY 0
+#endif
+
 /* modes of operation */
 enum {
 	MODE_NONE,

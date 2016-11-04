@@ -1,2 +1,5 @@
 *.o
+*.a
+*.dll
 bootimg
+bootimg.exe

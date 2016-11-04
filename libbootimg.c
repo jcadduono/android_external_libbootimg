@@ -27,6 +27,13 @@
 /* create new files as 0644 */
 #define NEW_FILE_PERMISSIONS (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
+/* mingw32-gcc compatibility */
+#if defined(_WIN32) || defined(__WIN32__)
+#define mkdir(A, B) mkdir(A)
+#else
+#define O_BINARY 0
+#endif
+
 static byte padding[131072] = { 0, };
 
 static void seek_padding(const int fd, const int pagesize, const off_t itemsize)
@@ -59,7 +66,7 @@ static byte *load_file(const char *file, uint32_t *size)
 	off_t sz;
 	byte *data;
 
-	fd = open(file, O_RDONLY);
+	fd = open(file, O_RDONLY | O_BINARY);
 	if (fd < 0)
 		return 0;
 
@@ -89,7 +96,7 @@ oops:
 
 static int save_file(const char* file, const byte* binary, const uint32_t size)
 {
-	int fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, NEW_FILE_PERMISSIONS);
+	int fd = open(file, O_CREAT | O_TRUNC | O_WRONLY | O_BINARY, NEW_FILE_PERMISSIONS);
 	if (fd < 0)
 		return EACCES;
 
@@ -498,7 +505,7 @@ boot_img *load_boot_image(const char *file)
 	char magic[BOOT_MAGIC_SIZE];
 	boot_img *image;
 
-	fd = open(file, O_RDONLY);
+	fd = open(file, O_RDONLY | O_BINARY);
 	if (fd < 0)
 		return 0;
 
@@ -567,7 +574,7 @@ oops:
 
 int write_boot_image(const boot_img *image, const char *file)
 {
-	int fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, NEW_FILE_PERMISSIONS);
+	int fd = open(file, O_CREAT | O_TRUNC | O_WRONLY | O_BINARY, NEW_FILE_PERMISSIONS);
 	if (fd < 0)
 		return EACCES;
 
