@@ -128,10 +128,8 @@ byte *bootimg_generate_hash(const boot_img *image)
 	SHA_update(&ctx, image->second, image->hdr.second_size);
 	SHA_update(&ctx, &image->hdr.second_size, sizeof(image->hdr.second_size));
 
-	if (image->hdr.dt_size) {
-		SHA_update(&ctx, image->dt, image->hdr.dt_size);
-		SHA_update(&ctx, &image->hdr.dt_size, sizeof(image->hdr.dt_size));
-	}
+	SHA_update(&ctx, image->dt, image->hdr.dt_size);
+	SHA_update(&ctx, &image->hdr.dt_size, sizeof(image->hdr.dt_size));
 
 	memcpy(hash, SHA_final(&ctx), SHA_DIGEST_SIZE);
 	return hash;
