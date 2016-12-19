@@ -63,40 +63,43 @@ enum {
 /* args set by user in command */
 enum
 {
-	ARG_BOARD           = 1 <<  0,
-	ARG_CMDLINE         = 1 <<  1,
-	ARG_PAGESIZE        = 1 <<  2,
-	ARG_BASE            = 1 <<  3,
-	ARG_KERNEL_OFFSET   = 1 <<  4,
-	ARG_RAMDISK_OFFSET  = 1 <<  5,
-	ARG_SECOND_OFFSET   = 1 <<  6,
-	ARG_TAGS_OFFSET     = 1 <<  7,
-	ARG_KERNEL          = 1 <<  8,
-	ARG_RAMDISK         = 1 <<  9,
-	ARG_SECOND          = 1 << 10,
-	ARG_DT              = 1 << 11,
-	ARG_HASH            = 1 << 12,
-	ARG_CMDLINE_ARG     = 1 << 13
+	ARG_BOARD           = 1U <<  0,
+	ARG_CMDLINE         = 1U <<  1,
+	ARG_MTK_HEADER      = 1U <<  2,
+	ARG_PAGESIZE        = 1U <<  3,
+	ARG_BASE            = 1U <<  4,
+	ARG_KERNEL_OFFSET   = 1U <<  5,
+	ARG_RAMDISK_OFFSET  = 1U <<  6,
+	ARG_SECOND_OFFSET   = 1U <<  7,
+	ARG_TAGS_OFFSET     = 1U <<  8,
+	ARG_KERNEL          = 1U <<  9,
+	ARG_RAMDISK         = 1U << 10,
+	ARG_SECOND          = 1U << 11,
+	ARG_DT              = 1U << 12,
+	ARG_HASH            = 1U << 13,
+	ARG_CMDLINE_ARG     = 1U << 14
+	/* ARG_ACTUALHASH   = 1U << 15 */
 };
 
 /* match arg flags (for verbose output) */
 enum
 {
-	INFO_MAGIC          = 1 <<  0,
-	INFO_CMDLINE        = 1 <<  1,
-	INFO_PAGESIZE       = 1 <<  2,
-	INFO_BASE           = 1 <<  3,
-	INFO_KERNEL_OFFSET  = 1 <<  4,
-	INFO_RAMDISK_OFFSET = 1 <<  5,
-	INFO_SECOND_OFFSET  = 1 <<  6,
-	INFO_TAGS_OFFSET    = 1 <<  7,
-	INFO_KERNEL_SIZE    = 1 <<  8,
-	INFO_RAMDISK_SIZE   = 1 <<  9,
-	INFO_SECOND_SIZE    = 1 << 10,
-	INFO_DT_SIZE        = 1 << 11,
-	INFO_HASH           = 1 << 12,
-	/* ARG_CMDLINE_ARG  = 1 << 13, */
-	INFO_ACTUALHASH     = 1 << 14
+	INFO_MAGIC          = 1U <<  0,
+	INFO_CMDLINE        = 1U <<  1,
+	INFO_MTK_HEADER     = 1U <<  2,
+	INFO_PAGESIZE       = 1U <<  3,
+	INFO_BASE           = 1U <<  4,
+	INFO_KERNEL_OFFSET  = 1U <<  5,
+	INFO_RAMDISK_OFFSET = 1U <<  6,
+	INFO_SECOND_OFFSET  = 1U <<  7,
+	INFO_TAGS_OFFSET    = 1U <<  8,
+	INFO_KERNEL_SIZE    = 1U <<  9,
+	INFO_RAMDISK_SIZE   = 1U << 10,
+	INFO_SECOND_SIZE    = 1U << 11,
+	INFO_DT_SIZE        = 1U << 12,
+	INFO_HASH           = 1U << 13,
+	/* ARG_CMDLINE_ARG  = 1U << 14, */
+	INFO_ACTUALHASH     = 1U << 15
 };
 
 static int write_string_to_file(const char *file, const char *string)
@@ -164,12 +167,12 @@ static char *read_hash(const byte *hash)
 
 void print_boot_info(const boot_img *image, const unsigned info)
 {
-	char *hash;
-
 	if (info & INFO_MAGIC)
 		LOGV("BOARD_MAGIC \"%s\"", image->hdr.board);
 	if (info & INFO_CMDLINE)
 		LOGV("BOARD_CMDLINE \"%s\"", image->hdr.cmdline);
+	if (info & INFO_MTK_HEADER && image->mtk_header)
+		LOGV("BOARD_MTK_HEADER \"%s\"", image->mtk_header->string);
 	if (info & INFO_PAGESIZE)
 		LOGV("BOARD_PAGESIZE %u", image->hdr.pagesize);
 	if (info & INFO_BASE)
@@ -192,14 +195,22 @@ void print_boot_info(const boot_img *image, const unsigned info)
 		LOGV("BOARD_DT_SIZE %u", image->hdr.dt_size);
 
 	if (info & INFO_HASH) {
-		hash = read_hash((byte*)image->hdr.hash);
-		LOGV("BOARD_HASH 0x%s", hash);
-		free(hash);
+		char *hash = read_hash((byte*)image->hdr.hash);
+		if (hash) {
+			LOGV("BOARD_HASH 0x%s", hash);
+			free(hash);
+		}
 	}
 	if (info & INFO_ACTUALHASH) {
-		hash = read_hash(bootimg_generate_hash(image));
-		LOGV("ACTUALHASH 0x%s", hash);
-		free(hash);
+		char *hash;
+		byte *bytes = bootimg_generate_hash(image);
+		if (!bytes)
+			return;
+		if ((hash = read_hash(bytes))) {
+			LOGV("ACTUALHASH 0x%s", hash);
+			free(hash);
+		}
+		free(bytes);
 	}
 }
 
@@ -223,6 +234,7 @@ static void print_usage(const char *app)
 		"   [ -m,  --board \"board magic\"    ]\n"
 		"   [ -l,  --cmdline \"boot cmdline\" ]\n"
 		"   [ -a,  --arg \"cmdline\" \"value\"  ]\n"
+		"   [ -mt, --mtk_header \"MAGIC\"     ]\n"
 		"   [ -p,  --pagesize <size>        ]\n"
 		"   [ -b,  --base <hex>             ]\n"
 		"   [ -ko, --kernel_offset <hex>    ]\n"
@@ -267,7 +279,7 @@ int main(const int argc, const char** argv)
 	const char *c, *input = 0, *output = 0;
 	char file[PATH_MAX], buf[1024], hex[16], *bname = 0,
 		*kernel = 0, *ramdisk = 0, *second = 0,
-		*dt = 0, *board = 0, *cmdline = 0;
+		*dt = 0, *board = 0, *cmdline = 0, *mtk_header = 0;
 	uint32_t base = 0,
 		kernel_offset = 0, ramdisk_offset = 0,
 		second_offset = 0, tags_offset = 0;
@@ -402,6 +414,16 @@ int main(const int argc, const char** argv)
 			case MODE_UPDATE:
 				requireval;
 				cmdline = strdup(argv[++i]);
+			}
+		} else
+		if (!strcmp(argv[i], "-mt") || !strcmp(argv[i], "-mtk")
+		 || !strcmp(argv[i], "--mtk_header")) {
+			args |= ARG_MTK_HEADER;
+			switch (mode) {
+			case MODE_CREATE:
+			case MODE_UPDATE:
+				requireval;
+				mtk_header = strdup(argv[++i]);
 			}
 		} else
 		if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--pagesize")) {
@@ -549,6 +571,8 @@ info:
 			info |= INFO_MAGIC;
 		if (*image->hdr.cmdline)
 			info |= INFO_CMDLINE;
+		if (image->mtk_header)
+			info |= INFO_MTK_HEADER;
 		if (image->kernel)
 			info |= INFO_KERNEL_SIZE;
 		if (image->ramdisk)
@@ -573,57 +597,64 @@ unpack:
 
 	args &= ~ARG_HASH; /* so --hash doesn't extract nothing */
 
-	if (!args || args & ARG_BOARD) {
+	if (args & ARG_BOARD || !args) {
 		sprintf(file, "%s/%s-%s", output, bname, "board");
 		write_string_to_file(file, (char*)image->hdr.board);
 	}
-	if (!args || args & ARG_CMDLINE) {
+	if (args & ARG_CMDLINE || !args) {
 		sprintf(file, "%s/%s-%s", output, bname, "cmdline");
 		write_string_to_file(file, (char*)image->hdr.cmdline);
 	}
-	if (!args || args & ARG_PAGESIZE) {
+	if (args & ARG_MTK_HEADER || (!args && image->mtk_header)) {
+		sprintf(file, "%s/%s-%s", output, bname, "mtk_header");
+		if (image->mtk_header)
+			write_string_to_file(file, (char*)image->mtk_header->string);
+		else
+			write_string_to_file(file, "");
+	}
+	if (args & ARG_PAGESIZE || !args) {
 		sprintf(file, "%s/%s-%s", output, bname, "pagesize");
 		sprintf(hex, "%u", image->hdr.pagesize);
 		write_string_to_file(file, hex);
 	}
-	if (!args || args & ARG_BASE) {
+	if (args & ARG_BASE || !args) {
 		sprintf(file, "%s/%s-%s", output, bname, "base");
 		sprintf(hex, "%08X", image->base);
 		write_string_to_file(file, hex);
 	}
-	if (!args || args & ARG_KERNEL_OFFSET) {
+	if (args & ARG_KERNEL_OFFSET || !args) {
 		sprintf(file, "%s/%s-%s", output, bname, "kernel_offset");
 		sprintf(hex, "%08X", image->kernel_offset);
 		write_string_to_file(file, hex);
 	}
-	if (!args || args & ARG_RAMDISK_OFFSET) {
+	if (args & ARG_RAMDISK_OFFSET || !args) {
 		sprintf(file, "%s/%s-%s", output, bname, "ramdisk_offset");
 		sprintf(hex, "%08X", image->ramdisk_offset);
 		write_string_to_file(file, hex);
 	}
-	if (!args || args & ARG_SECOND_OFFSET) {
+	if (args & ARG_SECOND_OFFSET || !args) {
 		sprintf(file, "%s/%s-%s", output, bname, "second_offset");
 		sprintf(hex, "%08X", image->second_offset);
 		write_string_to_file(file, hex);
 	}
-	if (!args || args & ARG_TAGS_OFFSET) {
+	if (args & ARG_TAGS_OFFSET || !args) {
 		sprintf(file, "%s/%s-%s", output, bname, "tags_offset");
 		sprintf(hex, "%08X", image->tags_offset);
 		write_string_to_file(file, hex);
 	}
-	if (!args || args & ARG_KERNEL) {
+	if (args & ARG_KERNEL || (!args && image->kernel)) {
 		sprintf(file, "%s/%s-%s", output, bname, "kernel");
 		bootimg_save_kernel(image, file);
 	}
-	if (!args || args & ARG_RAMDISK) {
+	if (args & ARG_RAMDISK || (!args && image->ramdisk)) {
 		sprintf(file, "%s/%s-%s", output, bname, "ramdisk");
 		bootimg_save_ramdisk(image, file);
 	}
-	if (!args || args & ARG_SECOND) {
+	if (args & ARG_SECOND || (!args && image->second)) {
 		sprintf(file, "%s/%s-%s", output, bname, "second");
 		bootimg_save_second(image, file);
 	}
-	if (!args || args & ARG_DT) {
+	if (args & ARG_DT || (!args && image->dt)) {
 		sprintf(file, "%s/%s-%s", output, bname, "dt");
 		bootimg_save_dt(image, file);
 	}
@@ -663,6 +694,14 @@ create:
 			foundfile("cmdline");
 			cmdline = strdup(buf);
 			args |= ARG_CMDLINE;
+			continue;
+		}
+		if (!(args & ARG_MTK_HEADER) && !strcmp(c, "mtk_header")) {
+			if (read_string_from_file(file, buf, sizeof(buf)))
+				continue;
+			foundfile("mtk_header");
+			mtk_header = strdup(buf);
+			args |= ARG_MTK_HEADER;
 			continue;
 		}
 		if (!(args & ARG_PAGESIZE) && !strcmp(c, "pagesize")) {
@@ -797,6 +836,10 @@ modify:
 		info |= INFO_CMDLINE;
 	}
 
+	if (args & ARG_MTK_HEADER
+	 && (ret = bootimg_set_mtk_header(image, mtk_header)))
+		failto("set mtk header");
+
 	if (args & ARG_KERNEL
 	 && (ret = bootimg_load_kernel(image, kernel)))
 		failto("load kernel image");
@@ -831,6 +874,8 @@ free:
 		free(board);
 	if (cmdline)
 		free(cmdline);
+	if (mtk_header)
+		free(mtk_header);
 	if (kernel)
 		free(kernel);
 	if (ramdisk)

@@ -21,6 +21,7 @@
 #define _BOOT_IMAGE_H_
 
 typedef struct boot_img_hdr boot_img_hdr;
+typedef struct boot_mtk_hdr boot_mtk_hdr;
 typedef struct boot_img boot_img;
 typedef unsigned char byte;
 
@@ -31,6 +32,11 @@ typedef unsigned char byte;
 #define BOOT_EXTRA_ARGS_SIZE 1024
 #define BOOT_HASH_SIZE 20
 #define BOOT_RESERVED_SIZE 12
+
+#define BOOT_MTK_HDR_MAGIC "\x88\x16\x88\x58"
+#define BOOT_MTK_HDR_MAGIC_SIZE 4
+#define BOOT_MTK_HDR_STRING_SIZE 32
+#define BOOT_MTK_HDR_PADDING_SIZE 472
 
 /* defaults when creating a new boot image */
 #define BOOT_DEFAULT_PAGESIZE       2048
@@ -47,7 +53,7 @@ struct boot_img_hdr
 	uint32_t kernel_size;  /* size in bytes */
 	uint32_t kernel_addr;  /* physical load addr */
 
-	uint32_t ramdisk_size; /* size in bytes */
+	uint32_t ramdisk_size; /* size in bytes including mtk header if applicable */
 	uint32_t ramdisk_addr; /* physical load addr */
 
 	uint32_t second_size;  /* size in bytes */
@@ -71,19 +77,33 @@ struct boot_img_hdr
 	byte extra_cmdline[BOOT_EXTRA_ARGS_SIZE];
 } __attribute__((packed));
 
-struct boot_img
+struct boot_mtk_hdr /* ramdisk header used on some mediatek devices */
 {
-	boot_img_hdr hdr;        /* the boot image header    */
-	byte *kernel;            /* pointer to kernel image  */
-	byte *ramdisk;           /* pointer to ramdisk image */
-	byte *second;            /* pointer to second image  */
-	byte *dt;                /* pointer to dt image      */
-	uint32_t base;           /* base location offsets are relative to */
-	uint32_t kernel_offset;  /* offset of kernel load addr  */
-	uint32_t ramdisk_offset; /* offset of ramdisk load addr */
-	uint32_t second_offset;  /* offset of second load addr  */
-	uint32_t tags_offset;    /* offset of kernel tags       */
+	byte magic[BOOT_MTK_HDR_MAGIC_SIZE];
+
+	uint32_t ramdisk_size; /* size in bytes (excluding mtk header) */
+
+	byte string[BOOT_MTK_HDR_STRING_SIZE]; /* ROOTFS or RECOVERY */
+
+	byte padding[BOOT_MTK_HDR_PADDING_SIZE]; /* padding of FF */
 } __attribute__((packed));
+
+struct boot_img /* not an actual layout! */
+{
+	boot_img_hdr hdr;         /* the boot image header */
+	boot_mtk_hdr *mtk_header; /* pointer to mtk header */
+
+	byte *kernel;             /* pointer to kernel image  */
+	byte *ramdisk;            /* pointer to ramdisk image */
+	byte *second;             /* pointer to second image  */
+	byte *dt;                 /* pointer to dt image      */
+
+	uint32_t base;            /* base location offsets are relative to */
+	uint32_t kernel_offset;   /* offset of kernel load addr  */
+	uint32_t ramdisk_offset;  /* offset of ramdisk load addr */
+	uint32_t second_offset;   /* offset of second load addr  */
+	uint32_t tags_offset;     /* offset of kernel tags       */
+};
 
 /*
 ** +-----------------+ 
@@ -91,6 +111,7 @@ struct boot_img
 ** +-----------------+
 ** | kernel          | n pages  
 ** +-----------------+
+** | [ mtk header ]  |
 ** | ramdisk         | m pages  
 ** +-----------------+
 ** | second stage    | o pages
@@ -113,10 +134,14 @@ struct boot_img
 ** 5. r0 = 0, r1 = MACHINE_TYPE, r2 = tags_addr
 ** 6. if second_size != 0: jump to second_addr
 **    else: jump to kernel_addr
+** 7. mtk headers are included in the ramdisk size
+**    of the boot image header, and are prepended
+**    to the actual ramdisk image. they are only
+**    ever used on some mediatek devices.
 */
 
 byte *bootimg_generate_hash(const boot_img *image);
-void bootimg_update_hash(boot_img *image);
+int bootimg_update_hash(boot_img *image);
 
 int bootimg_load_kernel(boot_img *image, const char *file);
 int bootimg_load_ramdisk(boot_img *image, const char *file);
@@ -133,6 +158,8 @@ int bootimg_set_board(boot_img *image, const char *board);
 int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val);
 int bootimg_delete_cmdline_arg(boot_img *image, const char *arg);
 int bootimg_set_cmdline(boot_img *image, const char *cmdline);
+
+int bootimg_set_mtk_header(boot_img *image, const char *string);
 
 int bootimg_set_pagesize(boot_img *image, const int pagesize);
 

@@ -115,7 +115,11 @@ close:
 byte *bootimg_generate_hash(const boot_img *image)
 {
 	SHA_CTX ctx;
-	byte *hash = calloc(sizeof(byte), BOOT_HASH_SIZE);
+	byte *hash;
+
+	hash = calloc(sizeof(byte), BOOT_HASH_SIZE);
+	if (!hash)
+		return 0;
 
 	SHA_init(&ctx);
 
@@ -135,71 +139,117 @@ byte *bootimg_generate_hash(const boot_img *image)
 	return hash;
 }
 
-void bootimg_update_hash(boot_img *image)
+int bootimg_update_hash(boot_img *image)
 {
 	byte *hash = bootimg_generate_hash(image);
+	if (!hash)
+		return ENOMEM;
+
 	memcpy(image->hdr.hash, hash, BOOT_HASH_SIZE);
+
 	free(hash);
+	return 0;
 }
 
 int bootimg_load_kernel(boot_img *image, const char *file)
 {
-	if (image->kernel)
+	if (image->kernel) {
 		free(image->kernel);
+		image->kernel = 0;
+	}
 
-	image->kernel = 0;
 	image->hdr.kernel_size = 0;
 
-	if (!file)
-		return 0;
+	if (file)
+		image->kernel = load_file(file, &image->hdr.kernel_size);
 
-	image->kernel = load_file(file, &image->hdr.kernel_size);
-	return !image->kernel;
+	return file && !image->kernel;
 }
 
 int bootimg_load_ramdisk(boot_img *image, const char *file)
 {
-	if (image->ramdisk)
-		free(image->ramdisk);
+	byte *ramdisk;
 
-	image->ramdisk = 0;
+	if (image->mtk_header) {
+		byte *rd_file;
+		size_t sz = sizeof(struct boot_mtk_hdr);
+		uint32_t f_sz;
+
+		ramdisk = realloc(image->ramdisk, sz);
+		if (!ramdisk)
+			return ENOMEM;
+
+		image->ramdisk = ramdisk;
+		image->hdr.ramdisk_size = sz;
+		image->mtk_header = (boot_mtk_hdr*)ramdisk;
+		image->mtk_header->ramdisk_size = 0;
+
+		if (!file)
+			return 0;
+
+		rd_file = load_file(file, &f_sz);
+		if (!rd_file)
+			return EINVAL;
+
+		sz += f_sz;
+		ramdisk = realloc(image->ramdisk, sz);
+		if (!ramdisk) {
+			free(rd_file);
+			return ENOMEM;
+		}
+
+		memcpy(ramdisk + sizeof(struct boot_mtk_hdr), rd_file, f_sz);
+		free(rd_file);
+
+		image->ramdisk = ramdisk;
+		image->hdr.ramdisk_size = sz;
+		image->mtk_header = (boot_mtk_hdr*)ramdisk;
+		image->mtk_header->ramdisk_size = f_sz;
+
+		return 0;
+	}
+
+	if (image->ramdisk) {
+		free(image->ramdisk);
+		image->ramdisk = 0;
+	}
+
 	image->hdr.ramdisk_size = 0;
 
-	if (!file)
-		return 0;
+	if (file)
+		ramdisk = load_file(file, &image->hdr.ramdisk_size);
 
-	image->ramdisk = load_file(file, &image->hdr.ramdisk_size);
-	return !image->ramdisk;
+	return file && !image->ramdisk;
 }
 
 int bootimg_load_second(boot_img *image, const char *file)
 {
-	if (image->second)
+	if (image->second) {
 		free(image->second);
+		image->second = 0;
+	}
 
-	image->second = 0;
 	image->hdr.second_size = 0;
 
-	if (!file)
-		return 0;
+	if (file)
+		image->second = load_file(file, &image->hdr.second_size);
 
-	image->second = load_file(file, &image->hdr.second_size);
-	return !image->second;
+	return file && !image->second;
 }
 
 int bootimg_load_dt(boot_img *image, const char *file)
 {
-	if (image->dt)
+	if (image->dt) {
 		free(image->dt);
+		image->dt = 0;
+	}
 
-	image->dt = 0;
 	image->hdr.dt_size = 0;
 
-	if (!file)
-		return 0;
+	if (file)
+		image->dt = load_file(file, &image->hdr.dt_size);
 
-	image->dt = load_file(file, &image->hdr.dt_size);
-	return !image->dt;
+	return file && !image->dt;
 }
 
 int bootimg_save_kernel(const boot_img *image, const char *file)
@@ -209,6 +259,8 @@ int bootimg_save_kernel(const boot_img *image, const char *file)
 
 int bootimg_save_ramdisk(const boot_img *image, const char *file)
 {
+	if (image->mtk_header)
+		return save_file(file, image->ramdisk + sizeof(struct boot_mtk_hdr), image->mtk_header->ramdisk_size);
 	return save_file(file, image->ramdisk, image->hdr.ramdisk_size);
 }
 
@@ -425,6 +477,59 @@ int bootimg_set_cmdline(boot_img *image, const char *cmdline)
 	return cmdline_update(image, 0, 0, 0);
 }
 
+int bootimg_set_mtk_header(boot_img *image, const char *string)
+{
+	size_t sz;
+	byte *ramdisk;
+	boot_mtk_hdr *hdr = image->mtk_header;
+
+	if (!string) {
+		if (!hdr)
+			return 0;
+
+		/* create a copy of the ramdisk without the mtk header */
+		sz = hdr->ramdisk_size;
+		ramdisk = malloc(sz);
+		if (!ramdisk)
+			return ENOMEM;
+
+		memcpy(ramdisk, image->ramdisk + sizeof(struct boot_mtk_hdr), sz);
+		free(image->ramdisk);
+		image->ramdisk = ramdisk;
+		hdr = 0;
+
+		return 0;
+	}
+
+	if (strlen(string) >= BOOT_MTK_HDR_STRING_SIZE)
+		return EMSGSIZE;
+
+	if (!hdr) {
+		/* create a copy of the ramdisk with space for the mtk header */
+		sz = image->hdr.ramdisk_size;
+		ramdisk = malloc(sizeof(struct boot_mtk_hdr) + sz);
+		if (!ramdisk)
+			return ENOMEM;
+
+		if (image->ramdisk) {
+			memcpy(ramdisk + sizeof(struct boot_mtk_hdr), image->ramdisk, sz);
+			free(image->ramdisk);
+		}
+
+		image->ramdisk = ramdisk;
+		image->mtk_header = hdr = (boot_mtk_hdr*)ramdisk;
+		image->hdr.ramdisk_size += sizeof(struct boot_mtk_hdr);
+
+		memcpy(&hdr->magic, BOOT_MTK_HDR_MAGIC, BOOT_MTK_HDR_MAGIC_SIZE);
+		memset(&hdr->padding, 0xFF, BOOT_MTK_HDR_PADDING_SIZE);
+	}
+
+	memset(&hdr->string, 0, BOOT_MTK_HDR_STRING_SIZE);
+	strcpy((char*)hdr->string, string);
+
+	return 0;
+}
+
 int bootimg_set_pagesize(boot_img *image, const int pagesize)
 {
 	switch (pagesize) {
@@ -479,7 +584,7 @@ boot_img *new_boot_image(void)
 {
 	boot_img *image;
 
-	image = calloc(1, sizeof(*image));
+	image = calloc(1, sizeof(struct boot_img));
 	if (!image)
 		return 0;
 
@@ -501,7 +606,7 @@ boot_img *load_boot_image(const char *file)
 {
 	int fd, i;
 	char magic[BOOT_MAGIC_SIZE];
-	boot_img *image;
+	boot_img *image = 0;
 
 	fd = open(file, O_RDONLY | O_BINARY);
 	if (fd < 0)
@@ -510,7 +615,7 @@ boot_img *load_boot_image(const char *file)
 	for (i = 0; i <= 4096; i++) {
 		lseek(fd, i, SEEK_SET);
 		read(fd, magic, BOOT_MAGIC_SIZE);
-		if (memcmp(magic, BOOT_MAGIC, BOOT_MAGIC_SIZE) == 0)
+		if (!memcmp(magic, BOOT_MAGIC, BOOT_MAGIC_SIZE))
 			break;
 	}
 
@@ -519,7 +624,7 @@ boot_img *load_boot_image(const char *file)
 
 	lseek(fd, i, SEEK_SET);
 
-	if (!(image = calloc(1, sizeof(*image))))
+	if (!(image = calloc(1, sizeof(struct boot_img))))
 		return 0;
 
 	if (read(fd, &image->hdr, sizeof(image->hdr)) != sizeof(image->hdr))
@@ -535,6 +640,8 @@ boot_img *load_boot_image(const char *file)
 
 	if (image->hdr.kernel_size) {
 		image->kernel = malloc(image->hdr.kernel_size);
+		if (!image->kernel)
+			goto oops;
 		if (read(fd, image->kernel, image->hdr.kernel_size) != (off_t)image->hdr.kernel_size)
 			goto oops;
 	}
@@ -543,14 +650,26 @@ boot_img *load_boot_image(const char *file)
 
 	if (image->hdr.ramdisk_size) {
 		image->ramdisk = malloc(image->hdr.ramdisk_size);
+		if (!image->ramdisk)
+			goto oops;
 		if (read(fd, image->ramdisk, image->hdr.ramdisk_size) != (off_t)image->hdr.ramdisk_size)
 			goto oops;
+
+		/* handle mtk header if it has one */
+		if (image->hdr.ramdisk_size >= sizeof(struct boot_mtk_hdr)
+		 && !memcmp(image->ramdisk, BOOT_MTK_HDR_MAGIC, BOOT_MTK_HDR_MAGIC_SIZE)) {
+			image->mtk_header = (boot_mtk_hdr*)image->ramdisk;
+			if (image->hdr.ramdisk_size != image->mtk_header->ramdisk_size + sizeof(struct boot_mtk_hdr))
+				goto oops; /* malformed mtk header */
+		}
 	}
 
 	seek_padding(fd, image->hdr.pagesize, image->hdr.ramdisk_size);
 
 	if (image->hdr.second_size) {
 		image->second = malloc(image->hdr.second_size);
+		if (!image->second)
+			goto oops;
 		if (read(fd, image->second, image->hdr.second_size) != (off_t)image->hdr.second_size)
 			goto oops;
 	}
@@ -559,6 +678,8 @@ boot_img *load_boot_image(const char *file)
 
 	if (image->hdr.dt_size) {
 		image->dt = malloc(image->hdr.dt_size);
+		if (!image->dt)
+			goto oops;
 		if (read(fd, image->dt, image->hdr.dt_size) != (off_t)image->hdr.dt_size)
 			goto oops;
 	}
@@ -567,6 +688,7 @@ boot_img *load_boot_image(const char *file)
 	return image;
 oops:
 	close(fd);
+	free_boot_image(image);
 	return 0;
 }
 
