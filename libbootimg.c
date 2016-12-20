@@ -24,8 +24,8 @@
 #include "bootimg.h"
 #include "mincrypt/sha.h"
 
-/* create new files as 0644 */
-#define NEW_FILE_PERMISSIONS (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+/* create new files as 0640 */
+#define NEW_FILE_PERMISSIONS (S_IRUSR | S_IWUSR | S_IRGRP)
 
 /* mingw32-gcc compatibility */
 #if defined(_WIN32) || defined(__WIN32__)
@@ -60,7 +60,7 @@ static int write_padding(const int fd, const int pagesize, const off_t itemsize)
 	return (write(fd, padding, count) == count) ? 0 : -1;
 }
 
-static byte *load_file(const char *file, uint32_t *size)
+static byte *load_file(const char *file, size_t *size)
 {
 	int fd;
 	off_t sz;
@@ -94,7 +94,7 @@ oops:
 	return 0;
 }
 
-static int save_file(const char* file, const byte* binary, const uint32_t size)
+static int save_file(const char* file, const byte* binary, const size_t size)
 {
 	int fd = open(file, O_CREAT | O_TRUNC | O_WRONLY | O_BINARY, NEW_FILE_PERMISSIONS);
 	if (fd < 0)
@@ -105,10 +105,41 @@ static int save_file(const char* file, const byte* binary, const uint32_t size)
 
 	if (write(fd, binary, size) != (off_t)size) {
 		close(fd);
+		unlink(file);
 		return EIO;
 	}
 close:
 	close(fd);
+	return 0;
+}
+
+static boot_img_item *get_item(boot_img *image, const byte item)
+{
+	switch (item) {
+	case BOOTIMG_KERNEL:
+		return &image->kernel;
+	case BOOTIMG_RAMDISK:
+		return &image->ramdisk;
+	case BOOTIMG_SECOND:
+		return &image->second;
+	case BOOTIMG_DT:
+		return &image->dt;
+	}
+	return 0;
+}
+
+static uint32_t *get_hdr_item_size(boot_img *image, const byte item)
+{
+	switch (item) {
+	case BOOTIMG_KERNEL:
+		return &image->hdr.kernel_size;
+	case BOOTIMG_RAMDISK:
+		return &image->hdr.ramdisk_size;
+	case BOOTIMG_SECOND:
+		return &image->hdr.second_size;
+	case BOOTIMG_DT:
+		return &image->hdr.dt_size;
+	}
 	return 0;
 }
 
@@ -123,16 +154,24 @@ byte *bootimg_generate_hash(const boot_img *image)
 
 	SHA_init(&ctx);
 
-	SHA_update(&ctx, image->kernel, image->hdr.kernel_size);
+	if (image->kernel.mtk_header)
+		SHA_update(&ctx, image->kernel.mtk_header, sizeof(struct boot_mtk_hdr));
+	SHA_update(&ctx, image->kernel.data, image->kernel.size);
 	SHA_update(&ctx, &image->hdr.kernel_size, sizeof(image->hdr.kernel_size));
 
-	SHA_update(&ctx, image->ramdisk, image->hdr.ramdisk_size);
+	if (image->ramdisk.mtk_header)
+		SHA_update(&ctx, image->ramdisk.mtk_header, sizeof(struct boot_mtk_hdr));
+	SHA_update(&ctx, image->ramdisk.data, image->ramdisk.size);
 	SHA_update(&ctx, &image->hdr.ramdisk_size, sizeof(image->hdr.ramdisk_size));
 
-	SHA_update(&ctx, image->second, image->hdr.second_size);
+	if (image->second.mtk_header)
+		SHA_update(&ctx, image->second.mtk_header, sizeof(struct boot_mtk_hdr));
+	SHA_update(&ctx, image->second.data, image->second.size);
 	SHA_update(&ctx, &image->hdr.second_size, sizeof(image->hdr.second_size));
 
-	SHA_update(&ctx, image->dt, image->hdr.dt_size);
+	if (image->dt.mtk_header)
+		SHA_update(&ctx, image->dt.mtk_header, sizeof(struct boot_mtk_hdr));
+	SHA_update(&ctx, image->dt.data, image->dt.size);
 	SHA_update(&ctx, &image->hdr.dt_size, sizeof(image->hdr.dt_size));
 
 	memcpy(hash, SHA_final(&ctx), SHA_DIGEST_SIZE);
@@ -151,127 +190,45 @@ int bootimg_update_hash(boot_img *image)
 	return 0;
 }
 
-int bootimg_load_kernel(boot_img *image, const char *file)
+int bootimg_load(boot_img *image, const byte item, const char *file)
 {
-	if (image->kernel) {
-		free(image->kernel);
-		image->kernel = 0;
-	}
+	size_t sz = 0;
+	uint32_t *hsz = get_hdr_item_size(image, item);
+	boot_img_item *i = get_item(image, item);
 
-	image->hdr.kernel_size = 0;
+	if (!i)
+		return EINVAL;
 
-	if (file)
-		image->kernel = load_file(file, &image->hdr.kernel_size);
-
-	return file && !image->kernel;
-}
-
-int bootimg_load_ramdisk(boot_img *image, const char *file)
-{
-	byte *ramdisk;
-
-	if (image->mtk_header) {
-		byte *rd_file;
-		size_t sz = sizeof(struct boot_mtk_hdr);
-		uint32_t f_sz;
-
-		ramdisk = realloc(image->ramdisk, sz);
-		if (!ramdisk)
-			return ENOMEM;
-
-		image->ramdisk = ramdisk;
-		image->hdr.ramdisk_size = sz;
-		image->mtk_header = (boot_mtk_hdr*)ramdisk;
-		image->mtk_header->ramdisk_size = 0;
-
-		if (!file)
-			return 0;
-
-		rd_file = load_file(file, &f_sz);
-		if (!rd_file)
-			return EINVAL;
-
-		sz += f_sz;
-		ramdisk = realloc(image->ramdisk, sz);
-		if (!ramdisk) {
-			free(rd_file);
-			return ENOMEM;
-		}
-
-		memcpy(ramdisk + sizeof(struct boot_mtk_hdr), rd_file, f_sz);
-		free(rd_file);
-
-		image->ramdisk = ramdisk;
-		image->hdr.ramdisk_size = sz;
-		image->mtk_header = (boot_mtk_hdr*)ramdisk;
-		image->mtk_header->ramdisk_size = f_sz;
-
+	if (file) {
+		byte *data = load_file(file, &sz);
+		if (!data)
+			return EACCES;
+		i->data = data;
+	} else if (i->data) {
+		free(i->data);
+		i->data = 0;
+	} else {
 		return 0;
 	}
 
-	if (image->ramdisk) {
-		free(image->ramdisk);
-		image->ramdisk = 0;
+	i->size = sz;
+	*hsz = sz;
+	if (i->mtk_header) {
+		i->mtk_header->size = sz;
+		*hsz += sizeof(struct boot_mtk_hdr);
 	}
 
-	image->hdr.ramdisk_size = 0;
-
-	if (file)
-		ramdisk = load_file(file, &image->hdr.ramdisk_size);
-
-	return file && !image->ramdisk;
+	return 0;
 }
 
-int bootimg_load_second(boot_img *image, const char *file)
+int bootimg_save(boot_img *image, const byte item, const char *file)
 {
-	if (image->second) {
-		free(image->second);
-		image->second = 0;
-	}
+	boot_img_item *i = get_item(image, item);
 
-	image->hdr.second_size = 0;
+	if (!i)
+		return EINVAL;
 
-	if (file)
-		image->second = load_file(file, &image->hdr.second_size);
-
-	return file && !image->second;
-}
-
-int bootimg_load_dt(boot_img *image, const char *file)
-{
-	if (image->dt) {
-		free(image->dt);
-		image->dt = 0;
-	}
-
-	image->hdr.dt_size = 0;
-
-	if (file)
-		image->dt = load_file(file, &image->hdr.dt_size);
-
-	return file && !image->dt;
-}
-
-int bootimg_save_kernel(const boot_img *image, const char *file)
-{
-	return save_file(file, image->kernel, image->hdr.kernel_size);
-}
-
-int bootimg_save_ramdisk(const boot_img *image, const char *file)
-{
-	if (image->mtk_header)
-		return save_file(file, image->ramdisk + sizeof(struct boot_mtk_hdr), image->mtk_header->ramdisk_size);
-	return save_file(file, image->ramdisk, image->hdr.ramdisk_size);
-}
-
-int bootimg_save_second(const boot_img *image, const char *file)
-{
-	return save_file(file, image->second, image->hdr.second_size);
-}
-
-int bootimg_save_dt(const boot_img *image, const char *file)
-{
-	return save_file(file, image->dt, image->hdr.dt_size);
+	return save_file(file, i->data, i->size);
 }
 
 int bootimg_set_board(boot_img *image, const char *board)
@@ -289,8 +246,7 @@ int bootimg_set_board(boot_img *image, const char *board)
 	return 0;
 }
 
-static int cmdline_update(boot_img *image,
-	const char *arg, const char *val, const int delete)
+int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val)
 {
 	int append;
 	int len = 0, larg = 0, lval = 0, in_quot = 0, arg_found = 0;
@@ -303,7 +259,7 @@ static int cmdline_update(boot_img *image,
 		lval = strlen(val);
 
 	if (!*str || !(len = strlen(str))) { /* empty cmdline */
-		if (delete) /* nothing to delete */
+		if (!val) /* nothing to delete */
 			goto done;
 		goto append_arg;
 	}
@@ -373,7 +329,7 @@ parse_arg:
 
 		arg_found = 1;
 
-		if (delete)
+		if (!val) /* delete arg if value is null */
 			goto delete_arg;
 
 		if (!lval) { /* keep arg, remove value */
@@ -407,7 +363,7 @@ next_arg:
 		/* we need to reset them */
 		arg_start = arg_end = val_start = val_end = 0;
 		if (!*c) {
-			if (delete)
+			if (!val)
 				goto done;
 			if (!arg_found)
 				goto append_arg;
@@ -453,16 +409,6 @@ oops:
 	return EMSGSIZE;
 }
 
-int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val)
-{
-	return cmdline_update(image, arg, val, 0);
-}
-
-int bootimg_delete_cmdline_arg(boot_img *image, const char *arg)
-{
-	return cmdline_update(image, arg, 0, 1);
-}
-
 int bootimg_set_cmdline(boot_img *image, const char *cmdline)
 {
 	if (!cmdline || !*cmdline) {
@@ -474,57 +420,60 @@ int bootimg_set_cmdline(boot_img *image, const char *cmdline)
 		return EMSGSIZE;
 
 	strcpy((char*)image->hdr.cmdline, cmdline);
-	return cmdline_update(image, 0, 0, 0);
+
+	return 0;
 }
 
-int bootimg_set_mtk_header(boot_img *image, const char *string)
+static boot_mtk_hdr *new_mtk_header(void)
 {
-	size_t sz;
-	byte *ramdisk;
-	boot_mtk_hdr *hdr = image->mtk_header;
+	boot_mtk_hdr *hdr = malloc(sizeof(struct boot_mtk_hdr));
+	if (!hdr)
+		return 0;
+
+	memcpy(&hdr->magic, BOOT_MTK_HDR_MAGIC, BOOT_MTK_HDR_MAGIC_SIZE);
+	hdr->size = 0;
+	memset(&hdr->string, 0, BOOT_MTK_HDR_STRING_SIZE);
+	memset(&hdr->padding, 0xFF, BOOT_MTK_HDR_PADDING_SIZE);
+
+	return hdr;
+}
+
+int bootimg_set_mtk_header(boot_img *image, const byte item, const char *string)
+{
+	boot_mtk_hdr *hdr;
+	boot_img_item *i = get_item(image, item);
+
+	if (!i)
+		return EINVAL;
+
+	hdr = i->mtk_header;
 
 	if (!string) {
-		if (!hdr)
-			return 0;
-
-		/* create a copy of the ramdisk without the mtk header */
-		sz = hdr->ramdisk_size;
-		ramdisk = malloc(sz);
-		if (!ramdisk)
-			return ENOMEM;
-
-		memcpy(ramdisk, image->ramdisk + sizeof(struct boot_mtk_hdr), sz);
-		free(image->ramdisk);
-		image->ramdisk = ramdisk;
-		hdr = 0;
-
+		if (hdr) {
+			uint32_t *sz = get_hdr_item_size(image, item);
+			*sz = hdr->size;
+			free(hdr);
+			i->mtk_header = 0;
+		}
 		return 0;
 	}
 
 	if (strlen(string) >= BOOT_MTK_HDR_STRING_SIZE)
 		return EMSGSIZE;
 
-	if (!hdr) {
-		/* create a copy of the ramdisk with space for the mtk header */
-		sz = image->hdr.ramdisk_size;
-		ramdisk = malloc(sizeof(struct boot_mtk_hdr) + sz);
-		if (!ramdisk)
+	if (hdr) {
+		memset(&hdr->string, 0, BOOT_MTK_HDR_STRING_SIZE);
+	} else {
+		uint32_t *sz = get_hdr_item_size(image, item);
+
+		hdr = i->mtk_header = new_mtk_header();
+		if (!hdr)
 			return ENOMEM;
-
-		if (image->ramdisk) {
-			memcpy(ramdisk + sizeof(struct boot_mtk_hdr), image->ramdisk, sz);
-			free(image->ramdisk);
-		}
-
-		image->ramdisk = ramdisk;
-		image->mtk_header = hdr = (boot_mtk_hdr*)ramdisk;
-		image->hdr.ramdisk_size += sizeof(struct boot_mtk_hdr);
-
-		memcpy(&hdr->magic, BOOT_MTK_HDR_MAGIC, BOOT_MTK_HDR_MAGIC_SIZE);
-		memset(&hdr->padding, 0xFF, BOOT_MTK_HDR_PADDING_SIZE);
+		hdr->size = *sz;
+		if (sz)
+			*sz += sizeof(*hdr);
 	}
 
-	memset(&hdr->string, 0, BOOT_MTK_HDR_STRING_SIZE);
 	strcpy((char*)hdr->string, string);
 
 	return 0;
@@ -550,34 +499,37 @@ int bootimg_set_pagesize(boot_img *image, const int pagesize)
 void bootimg_set_base(boot_img *image, const uint32_t base)
 {
 	image->base = base;
-	image->hdr.kernel_addr  = base + image->kernel_offset;
-	image->hdr.ramdisk_addr = base + image->ramdisk_offset;
-	image->hdr.second_addr  = base + image->second_offset;
+	image->hdr.kernel_addr  = base + image->kernel.offset;
+	image->hdr.ramdisk_addr = base + image->ramdisk.offset;
+	image->hdr.second_addr  = base + image->second.offset;
 	image->hdr.tags_addr    = base + image->tags_offset;
 }
 
-void bootimg_set_kernel_offset(boot_img *image, const uint32_t offset)
+void bootimg_set_offset(boot_img *image, const byte item, const uint32_t offset)
 {
-	image->kernel_offset    = offset;
-	image->hdr.kernel_addr  = image->base + offset;
-}
+	boot_img_item *i = get_item(image, item);
+	if (!i)
+		return;
 
-void bootimg_set_ramdisk_offset(boot_img *image, const uint32_t offset)
-{
-	image->ramdisk_offset   = offset;
-	image->hdr.ramdisk_addr = image->base + offset;
-}
+	i->offset = offset;
 
-void bootimg_set_second_offset(boot_img *image, const uint32_t offset)
-{
-	image->second_offset    = offset;
-	image->hdr.second_addr  = image->base + offset;
+	switch (item) {
+	case BOOTIMG_KERNEL:
+		image->hdr.kernel_addr = image->base + offset;
+		break;
+	case BOOTIMG_RAMDISK:
+		image->hdr.ramdisk_addr = image->base + offset;
+		break;
+	case BOOTIMG_SECOND:
+		image->hdr.second_addr = image->base + offset;
+		break;
+	}
 }
 
 void bootimg_set_tags_offset(boot_img *image, const uint32_t offset)
 {
-	image->tags_offset      = offset;
-	image->hdr.tags_addr    = image->base + offset;
+	image->tags_offset = offset;
+	image->hdr.tags_addr = image->base + offset;
 }
 
 boot_img *new_boot_image(void)
@@ -594,12 +546,64 @@ boot_img *new_boot_image(void)
 
 	image->base = BOOT_DEFAULT_BASE;
 
-	bootimg_set_kernel_offset(image,  BOOT_DEFAULT_KERNEL_OFFSET);
-	bootimg_set_ramdisk_offset(image, BOOT_DEFAULT_RAMDISK_OFFSET);
-	bootimg_set_second_offset(image,  BOOT_DEFAULT_SECOND_OFFSET);
-	bootimg_set_tags_offset(image,    BOOT_DEFAULT_TAGS_OFFSET);
+	bootimg_set_offset(image, BOOTIMG_KERNEL,  BOOT_DEFAULT_KERNEL_OFFSET);
+	bootimg_set_offset(image, BOOTIMG_RAMDISK, BOOT_DEFAULT_RAMDISK_OFFSET);
+	bootimg_set_offset(image, BOOTIMG_SECOND,  BOOT_DEFAULT_SECOND_OFFSET);
+	bootimg_set_tags_offset(image, BOOT_DEFAULT_TAGS_OFFSET);
 
 	return image;
+}
+
+/* all freeing after errors is done by the calling function */
+static int read_boot_image_item(boot_img *image, int fd, const byte item)
+{
+	char magic[BOOT_MTK_HDR_MAGIC_SIZE];
+	size_t sz;
+	boot_img_item *i = get_item(image, item);
+
+	if (!i)
+		return EINVAL;
+
+	sz = *get_hdr_item_size(image, item);
+	if (!sz)
+		return 0; /* item is empty */
+
+	if (sz < sizeof(struct boot_mtk_hdr))
+		goto read_item; /* too small to contain a mtk header */
+
+	/* check for mtk magic */
+	read(fd, magic, BOOT_MTK_HDR_MAGIC_SIZE);
+	lseek(fd, (off_t)-sizeof(magic), SEEK_CUR);
+	if (memcmp(magic, BOOT_MTK_HDR_MAGIC, sizeof(magic)))
+		goto read_item; /* not an mtk header */
+
+	/* allocate the mtk header */
+	i->mtk_header = malloc(sizeof(struct boot_mtk_hdr));
+	if (!i->mtk_header)
+		return ENOMEM;
+
+	/* read the mtk header from the fd */
+	if (read(fd, i->mtk_header, sizeof(struct boot_mtk_hdr)) != sizeof(struct boot_mtk_hdr))
+		return EIO;
+
+	if (i->mtk_header->size != (sz - sizeof(struct boot_mtk_hdr)))
+		return EINVAL;
+
+	sz = i->mtk_header->size;
+
+read_item:
+	i->size = sz;
+
+	/* allocate the item's data */
+	i->data = malloc(i->size);
+	if (!i->data)
+		return ENOMEM;
+
+	/* read the item from the fd */
+	if (read(fd, i->data, i->size) != (off_t)i->size)
+		return EIO;
+
+	return 0;
 }
 
 boot_img *load_boot_image(const char *file)
@@ -624,65 +628,42 @@ boot_img *load_boot_image(const char *file)
 
 	lseek(fd, i, SEEK_SET);
 
-	if (!(image = calloc(1, sizeof(struct boot_img))))
-		return 0;
+	image = calloc(1, sizeof(struct boot_img));
+	if (!image)
+		goto oops;
 
 	if (read(fd, &image->hdr, sizeof(image->hdr)) != sizeof(image->hdr))
 		goto oops;
 
 	image->base = image->hdr.kernel_addr - 0x00008000U;
-	image->kernel_offset = image->hdr.kernel_addr - image->base;
-	image->ramdisk_offset = image->hdr.ramdisk_addr - image->base;
-	image->second_offset = image->hdr.second_addr - image->base;
+	image->kernel.offset = image->hdr.kernel_addr - image->base;
+	image->ramdisk.offset = image->hdr.ramdisk_addr - image->base;
+	image->second.offset = image->hdr.second_addr - image->base;
 	image->tags_offset = image->hdr.tags_addr - image->base;
 
 	seek_padding(fd, image->hdr.pagesize, sizeof(image->hdr));
 
-	if (image->hdr.kernel_size) {
-		image->kernel = malloc(image->hdr.kernel_size);
-		if (!image->kernel)
-			goto oops;
-		if (read(fd, image->kernel, image->hdr.kernel_size) != (off_t)image->hdr.kernel_size)
-			goto oops;
-	}
+	if (image->hdr.kernel_size
+	 && read_boot_image_item(image, fd, BOOTIMG_KERNEL))
+		goto oops;
 
 	seek_padding(fd, image->hdr.pagesize, image->hdr.kernel_size);
 
-	if (image->hdr.ramdisk_size) {
-		image->ramdisk = malloc(image->hdr.ramdisk_size);
-		if (!image->ramdisk)
-			goto oops;
-		if (read(fd, image->ramdisk, image->hdr.ramdisk_size) != (off_t)image->hdr.ramdisk_size)
-			goto oops;
-
-		/* handle mtk header if it has one */
-		if (image->hdr.ramdisk_size >= sizeof(struct boot_mtk_hdr)
-		 && !memcmp(image->ramdisk, BOOT_MTK_HDR_MAGIC, BOOT_MTK_HDR_MAGIC_SIZE)) {
-			image->mtk_header = (boot_mtk_hdr*)image->ramdisk;
-			if (image->hdr.ramdisk_size != image->mtk_header->ramdisk_size + sizeof(struct boot_mtk_hdr))
-				goto oops; /* malformed mtk header */
-		}
-	}
+	if (image->hdr.ramdisk_size
+	 && read_boot_image_item(image, fd, BOOTIMG_RAMDISK))
+		goto oops;
 
 	seek_padding(fd, image->hdr.pagesize, image->hdr.ramdisk_size);
 
-	if (image->hdr.second_size) {
-		image->second = malloc(image->hdr.second_size);
-		if (!image->second)
-			goto oops;
-		if (read(fd, image->second, image->hdr.second_size) != (off_t)image->hdr.second_size)
-			goto oops;
-	}
+	if (image->hdr.second_size
+	 && read_boot_image_item(image, fd, BOOTIMG_SECOND))
+		goto oops;
 
 	seek_padding(fd, image->hdr.pagesize, image->hdr.second_size);
 
-	if (image->hdr.dt_size) {
-		image->dt = malloc(image->hdr.dt_size);
-		if (!image->dt)
-			goto oops;
-		if (read(fd, image->dt, image->hdr.dt_size) != (off_t)image->hdr.dt_size)
-			goto oops;
-	}
+	if (image->hdr.dt_size
+	 && read_boot_image_item(image, fd, BOOTIMG_DT))
+		goto oops;
 
 	close(fd);
 	return image;
@@ -692,7 +673,33 @@ oops:
 	return 0;
 }
 
-int write_boot_image(const boot_img *image, const char *file)
+static int write_boot_image_item(boot_img *image, int fd, const byte item)
+{
+	size_t sz;
+	boot_img_item *i = get_item(image, item);
+
+	if (!i)
+		return EINVAL;
+
+	if (i->mtk_header) {
+		/* write the mtk header to the fd */
+		if (write(fd, i->mtk_header, sizeof(struct boot_mtk_hdr)) != sizeof(struct boot_mtk_hdr))
+			return EIO;
+		sz = i->mtk_header->size;
+	} else {
+		sz = *get_hdr_item_size(image, item);
+	}
+
+	if (!sz)
+		return 0;
+
+	if (write(fd, i->data, sz) != (off_t)sz)
+		return EIO;
+
+	return 0;
+}
+
+int write_boot_image(boot_img *image, const char *file)
 {
 	int fd = open(file, O_CREAT | O_TRUNC | O_WRONLY | O_BINARY, NEW_FILE_PERMISSIONS);
 	if (fd < 0)
@@ -704,25 +711,25 @@ int write_boot_image(const boot_img *image, const char *file)
 		goto oops;
 
 	if (image->hdr.kernel_size) {
-		if (write(fd, image->kernel, image->hdr.kernel_size) != (off_t)image->hdr.kernel_size)
+		if (write_boot_image_item(image, fd, BOOTIMG_KERNEL))
 			goto oops;
 		if (write_padding(fd, image->hdr.pagesize, image->hdr.kernel_size))
 			goto oops;
 	}
 	if (image->hdr.ramdisk_size) {
-		if (write(fd, image->ramdisk, image->hdr.ramdisk_size) != (off_t)image->hdr.ramdisk_size)
+		if (write_boot_image_item(image, fd, BOOTIMG_RAMDISK))
 			goto oops;
 		if (write_padding(fd, image->hdr.pagesize, image->hdr.ramdisk_size))
 			goto oops;
 	}
 	if (image->hdr.second_size) {
-		if (write(fd, image->second, image->hdr.second_size) != (off_t)image->hdr.second_size)
+		if (write_boot_image_item(image, fd, BOOTIMG_SECOND))
 			goto oops;
 		if (write_padding(fd, image->hdr.pagesize, image->hdr.second_size))
 			goto oops;
 	}
 	if (image->hdr.dt_size) {
-		if (write(fd, image->dt, image->hdr.dt_size) != (off_t)image->hdr.dt_size)
+		if (write_boot_image_item(image, fd, BOOTIMG_DT))
 			goto oops;
 		if (write_padding(fd, image->hdr.pagesize, image->hdr.dt_size))
 			goto oops;
@@ -732,6 +739,7 @@ int write_boot_image(const boot_img *image, const char *file)
 	return 0;
 oops:
 	close(fd);
+	unlink(file);
 	return EIO;
 }
 
@@ -739,13 +747,26 @@ void free_boot_image(boot_img *image)
 {
 	if (!image)
 		return;
-	if (image->kernel)
-		free(image->kernel);
-	if (image->ramdisk)
-		free(image->ramdisk);
-	if (image->second)
-		free(image->second);
-	if (image->dt)
-		free(image->dt);
+
+	if (image->kernel.mtk_header)
+		free(image->kernel.mtk_header);
+	if (image->kernel.data)
+		free(image->kernel.data);
+
+	if (image->ramdisk.mtk_header)
+		free(image->ramdisk.mtk_header);
+	if (image->ramdisk.data)
+		free(image->ramdisk.data);
+
+	if (image->second.mtk_header)
+		free(image->second.mtk_header);
+	if (image->second.data)
+		free(image->second.data);
+
+	if (image->dt.mtk_header)
+		free(image->dt.mtk_header);
+	if (image->dt.data)
+		free(image->dt.data);
+
 	free(image);
 }
