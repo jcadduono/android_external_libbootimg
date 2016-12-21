@@ -55,7 +55,7 @@ static int write_padding(const int fd, const int pagesize, const off_t itemsize)
 
 	count = pagesize - (itemsize & pagemask);
 
-	return (write(fd, padding, count) == count) ? 0 : -1;
+	return (write(fd, padding, count) != count);
 }
 
 static byte *load_file(const char *file, size_t *size)
@@ -419,10 +419,10 @@ oops:
 
 int bootimg_set_cmdline(boot_img *image, const char *cmdline)
 {
-	if (!cmdline || !*cmdline) {
-		memset(&image->hdr.cmdline, 0, BOOT_ARGS_SIZE);
+	memset(&image->hdr.cmdline, 0, BOOT_ARGS_SIZE);
+
+	if (!cmdline || !*cmdline)
 		return 0;
-	}
 
 	if (strlen(cmdline) >= BOOT_ARGS_SIZE)
 		return EMSGSIZE;
