@@ -20,6 +20,11 @@ ifdef BOOTIMG_LOGGING
 	bootimg_shared_libs += liblog
 endif
 
+ifdef BOOTIMG_NO_MTK
+	libbootimg_cflags += -DNO_MTK_SUPPORT=1
+	bootimg_cflags += -DNO_MTK_SUPPORT=1
+endif
+
 include $(CLEAR_VARS)
 LOCAL_MODULE := libbootimg-static
 LOCAL_SRC_FILES := $(libbootimg_src)

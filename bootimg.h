@@ -20,10 +20,6 @@
 #ifndef _BOOT_IMAGE_H_
 #define _BOOT_IMAGE_H_
 
-typedef struct boot_img_hdr boot_img_hdr;
-typedef struct boot_mtk_hdr boot_mtk_hdr;
-typedef struct boot_img_item boot_img_item;
-typedef struct boot_img boot_img;
 typedef unsigned char byte;
 
 #define BOOT_MAGIC "ANDROID!"
@@ -34,10 +30,12 @@ typedef unsigned char byte;
 #define BOOT_HASH_SIZE 20
 #define BOOT_RESERVED_SIZE 12
 
+#ifndef NO_MTK_SUPPORT
 #define BOOT_MTK_HDR_MAGIC "\x88\x16\x88\x58"
 #define BOOT_MTK_HDR_MAGIC_SIZE 4
 #define BOOT_MTK_HDR_STRING_SIZE 32
 #define BOOT_MTK_HDR_PADDING_SIZE 472
+#endif
 
 /* defaults when creating a new boot image */
 #define BOOT_DEFAULT_PAGESIZE       2048
@@ -47,7 +45,7 @@ typedef unsigned char byte;
 #define BOOT_DEFAULT_SECOND_OFFSET  0x00F00000U
 #define BOOT_DEFAULT_TAGS_OFFSET    0x00000100U
 
-struct boot_img_hdr
+typedef struct boot_img_hdr
 {
 	byte magic[BOOT_MAGIC_SIZE];
 
@@ -76,9 +74,10 @@ struct boot_img_hdr
 	/* Supplemental command line data; kept here to maintain
 	* binary compatibility with older versions of mkbootimg */
 	byte extra_cmdline[BOOT_EXTRA_ARGS_SIZE];
-} __attribute__((packed));
+} __attribute__((packed)) boot_img_hdr;
 
-struct boot_mtk_hdr /* ramdisk header used on some mediatek devices */
+#ifndef NO_MTK_SUPPORT
+typedef struct boot_mtk_hdr /* ramdisk header used on some mediatek devices */
 {
 	byte magic[BOOT_MTK_HDR_MAGIC_SIZE];
 
@@ -87,20 +86,22 @@ struct boot_mtk_hdr /* ramdisk header used on some mediatek devices */
 	byte string[BOOT_MTK_HDR_STRING_SIZE]; /* KERNEL/ROOTFS/RECOVERY */
 
 	byte padding[BOOT_MTK_HDR_PADDING_SIZE]; /* padding of FF */
-} __attribute__((packed));
+} __attribute__((packed)) boot_mtk_hdr;
+#endif
 
-
-struct boot_img_item /* an item embedded in the boot image, ex. kernel */
+typedef struct boot_img_item /* an item embedded in the boot image, ex. kernel */
 {
+#ifndef NO_MTK_SUPPORT
 	boot_mtk_hdr *mtk_header;
+#endif
 	byte *data;
 
 	size_t size;
 
 	uint32_t offset;
-};
+} boot_img_item;
 
-struct boot_img
+typedef struct boot_img
 {
 	boot_img_hdr hdr;      /* the boot image header */
 
@@ -111,7 +112,7 @@ struct boot_img
 
 	uint32_t base;         /* base location offsets are relative to */
 	uint32_t tags_offset;  /* offset of kernel tags */
-};
+} boot_img;
 
 /*
 ** +-----------------+ 
@@ -172,8 +173,9 @@ int bootimg_set_cmdline(boot_img *image, const char *cmdline);
 /* a null val will delete the arg from the cmdline */
 int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val);
 
+#ifndef NO_MTK_SUPPORT
 int bootimg_set_mtk_header(boot_img *image, const byte item, const char *string);
-/* item is a choice from the above boot image item enum */
+#endif
 
 int bootimg_set_pagesize(boot_img *image, const int pagesize);
 

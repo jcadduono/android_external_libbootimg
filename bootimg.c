@@ -74,10 +74,12 @@ enum
 	ARG_RAMDISK_OFFSET  = 1U <<  6,
 	ARG_SECOND_OFFSET   = 1U <<  7,
 	ARG_TAGS_OFFSET     = 1U <<  8,
+#ifndef NO_MTK_SUPPORT
 	ARG_KERNEL_MTK      = 1U <<  9,
 	ARG_RAMDISK_MTK     = 1U << 10,
 	ARG_SECOND_MTK      = 1U << 11,
 	ARG_DT_MTK          = 1U << 12,
+#endif
 	ARG_KERNEL          = 1U << 13,
 	ARG_RAMDISK         = 1U << 14,
 	ARG_SECOND          = 1U << 15,
@@ -99,10 +101,12 @@ enum
 	INFO_RAMDISK_OFFSET = 1U <<  6,
 	INFO_SECOND_OFFSET  = 1U <<  7,
 	INFO_TAGS_OFFSET    = 1U <<  8,
+#ifndef NO_MTK_SUPPORT
 	INFO_KERNEL_MTK     = 1U <<  9,
 	INFO_RAMDISK_MTK    = 1U << 10,
 	INFO_SECOND_MTK     = 1U << 11,
 	INFO_DT_MTK         = 1U << 12,
+#endif
 	INFO_KERNEL_SIZE    = 1U << 13,
 	INFO_RAMDISK_SIZE   = 1U << 14,
 	INFO_SECOND_SIZE    = 1U << 15,
@@ -209,6 +213,7 @@ void print_boot_info(const boot_img *image, const unsigned info)
 	if (info & INFO_DT_SIZE)
 		LOGV("BOARD_DT_SIZE %u", (unsigned)image->dt.size);
 
+#ifndef NO_MTK_SUPPORT
 	if (info & INFO_KERNEL_MTK && image->kernel.mtk_header)
 		LOGV("BOARD_KERNEL_MTK \"%s\"", image->kernel.mtk_header->string);
 	if (info & INFO_RAMDISK_MTK && image->ramdisk.mtk_header)
@@ -217,6 +222,7 @@ void print_boot_info(const boot_img *image, const unsigned info)
 		LOGV("BOARD_SECOND_MTK \"%s\"", image->second.mtk_header->string);
 	if (info & INFO_DT_MTK && image->dt.mtk_header)
 		LOGV("BOARD_DT_MTK \"%s\"", image->dt.mtk_header->string);
+#endif
 
 	if (info & INFO_HASH) {
 		char *hash = read_hash((byte*)image->hdr.hash);
@@ -266,6 +272,7 @@ static void print_usage(const char *app)
 		"   [ -to, --tags_offset <hex>      ]\n"
 		"   [ -h,  --hash                   ]\n"
 	);
+#ifndef NO_MTK_SUPPORT
 	LOGE(
 		" Options for MediaTek devices:\n"
 		"   [ -km, --kernel_mtk \"KERNEL\"    ]\n"
@@ -273,6 +280,7 @@ static void print_usage(const char *app)
 		"   [ -sm, --second_mtk \"SECOND\"    ]\n"
 		"   [ -tm, --dt_mtk \"DTIMAGE\"       ]\n"
 	);
+#endif
 	LOGE(
 		" Unpack:\n"
 		"     -i,  --input \"boot.img\"\n"
@@ -316,8 +324,10 @@ int main(const int argc, const char** argv)
 	const char *c, *input = 0, *output = 0;
 	char file[PATH_MAX], buf[1024], hex[16], *bname = 0,
 		*board = 0, *cmdline = 0,
-		*kernel = 0, *ramdisk = 0, *second = 0, *dt = 0,
-		*kernel_mtk = 0, *ramdisk_mtk = 0, *second_mtk = 0, *dt_mtk = 0;
+		*kernel = 0, *ramdisk = 0, *second = 0, *dt = 0;
+#ifndef NO_MTK_SUPPORT
+	char *kernel_mtk = 0, *ramdisk_mtk = 0, *second_mtk = 0, *dt_mtk = 0;
+#endif
 	uint32_t base = 0, tags_offset = 0,
 		kernel_offset = 0, ramdisk_offset = 0, second_offset = 0;
 	int i, argstart, mode = MODE_NONE,
@@ -523,6 +533,7 @@ int main(const int argc, const char** argv)
 				tags_offset = strtoul(argv[++i], 0, 16);
 			}
 		} else
+#ifndef NO_MTK_SUPPORT
 		if (!strcmp(argv[i], "-km") || !strcmp(argv[i], "-mk")
 		 || !strcmp(argv[i], "--kernel_mtk")) {
 			args |= ARG_KERNEL_MTK;
@@ -571,6 +582,7 @@ int main(const int argc, const char** argv)
 				dt_mtk = strdup(argv[++i]);
 			}
 		} else
+#endif
 		if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--hash")) {
 			args |= ARG_HASH;
 		} else
@@ -666,6 +678,7 @@ info:
 			info |= INFO_SECOND_SIZE;
 		if (image->dt.size)
 			info |= INFO_DT_SIZE;
+#ifndef NO_MTK_SUPPORT
 		if (image->kernel.mtk_header)
 			info |= INFO_KERNEL_MTK;
 		if (image->ramdisk.mtk_header)
@@ -674,6 +687,7 @@ info:
 			info |= INFO_SECOND_MTK;
 		if (image->dt.mtk_header)
 			info |= INFO_DT_MTK;
+#endif
 	}
 
 	if (args & ARG_HASH)
@@ -744,6 +758,7 @@ unpack:
 		setfile("dt");
 		bootimg_save(image, BOOTIMG_DT, file);
 	}
+#ifndef NO_MTK_SUPPORT
 	if (args & ARG_KERNEL_MTK || (!args && image->kernel.mtk_header)) {
 		setfile("kernel_mtk");
 		if (image->kernel.mtk_header)
@@ -772,7 +787,7 @@ unpack:
 		else
 			write_string_to_file(file, 0);
 	}
-
+#endif
 	goto free;
 
 create:
@@ -882,6 +897,7 @@ create:
 			args |= ARG_DT;
 			continue;
 		}
+#ifndef NO_MTK_SUPPORT
 		if (!(args & ARG_KERNEL_MTK) && !strcmp(c, "kernel_mtk")) {
 			if (read_string_from_file(file, buf, sizeof(buf)))
 				continue;
@@ -914,6 +930,7 @@ create:
 			args |= ARG_DT_MTK;
 			continue;
 		}
+#endif
 	}
 
 	closedir(dfd);
@@ -991,6 +1008,7 @@ modify:
 	 && (ret = bootimg_load(image, BOOTIMG_DT, dt)))
 		failto("load dt image");
 
+#ifndef NO_MTK_SUPPORT
 	if (args & ARG_KERNEL_MTK
 	 && (ret = bootimg_set_mtk_header(image, BOOTIMG_KERNEL, kernel_mtk)))
 		failto("set kernel mtk header");
@@ -1006,6 +1024,7 @@ modify:
 	if (args & ARG_DT_MTK
 	 && (ret = bootimg_set_mtk_header(image, BOOTIMG_DT, dt_mtk)))
 		failto("set dt mtk header");
+#endif
 
 	if (args & ARG_HASH) {
 		bootimg_update_hash(image);
@@ -1026,10 +1045,12 @@ free:
 	unset(ramdisk);
 	unset(second);
 	unset(dt);
+#ifndef NO_MTK_SUPPORT
 	unset(kernel_mtk);
 	unset(ramdisk_mtk);
 	unset(second_mtk);
 	unset(dt_mtk);
+#endif
 	free_boot_image(image);
 	return ret;
 }

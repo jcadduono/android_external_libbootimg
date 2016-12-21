@@ -6,6 +6,10 @@ BOOTIMG_SRC := bootimg.c
 
 CFLAGS += -Wall -Wpedantic -Wextra -std=gnu99 -Os -s
 
+ifdef BOOTIMG_NO_MTK
+	CFLAGS += -DNO_MTK_SUPPORT=1
+endif
+
 MINGW32 := x86_64-w64-mingw32
 
 bootimg: $(BOOTIMG_SRC) $(LIBBOOTIMG_SRC)

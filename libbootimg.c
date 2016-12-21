@@ -28,9 +28,7 @@
 #define NEW_FILE_PERMISSIONS (S_IRUSR | S_IWUSR | S_IRGRP)
 
 /* mingw32-gcc compatibility */
-#if defined(_WIN32) || defined(__WIN32__)
-#define mkdir(A, B) mkdir(A)
-#else
+#ifndef O_BINARY
 #define O_BINARY 0
 #endif
 
@@ -154,23 +152,31 @@ byte *bootimg_generate_hash(const boot_img *image)
 
 	SHA_init(&ctx);
 
+#ifndef NO_MTK_SUPPORT
 	if (image->kernel.mtk_header)
 		SHA_update(&ctx, image->kernel.mtk_header, sizeof(struct boot_mtk_hdr));
+#endif
 	SHA_update(&ctx, image->kernel.data, image->kernel.size);
 	SHA_update(&ctx, &image->hdr.kernel_size, sizeof(image->hdr.kernel_size));
 
+#ifndef NO_MTK_SUPPORT
 	if (image->ramdisk.mtk_header)
 		SHA_update(&ctx, image->ramdisk.mtk_header, sizeof(struct boot_mtk_hdr));
+#endif
 	SHA_update(&ctx, image->ramdisk.data, image->ramdisk.size);
 	SHA_update(&ctx, &image->hdr.ramdisk_size, sizeof(image->hdr.ramdisk_size));
 
+#ifndef NO_MTK_SUPPORT
 	if (image->second.mtk_header)
 		SHA_update(&ctx, image->second.mtk_header, sizeof(struct boot_mtk_hdr));
+#endif
 	SHA_update(&ctx, image->second.data, image->second.size);
 	SHA_update(&ctx, &image->hdr.second_size, sizeof(image->hdr.second_size));
 
+#ifndef NO_MTK_SUPPORT
 	if (image->dt.mtk_header)
 		SHA_update(&ctx, image->dt.mtk_header, sizeof(struct boot_mtk_hdr));
+#endif
 	SHA_update(&ctx, image->dt.data, image->dt.size);
 	SHA_update(&ctx, &image->hdr.dt_size, sizeof(image->hdr.dt_size));
 
@@ -213,10 +219,12 @@ int bootimg_load(boot_img *image, const byte item, const char *file)
 
 	i->size = sz;
 	*hsz = sz;
+#ifndef NO_MTK_SUPPORT
 	if (i->mtk_header) {
 		i->mtk_header->size = sz;
 		*hsz += sizeof(struct boot_mtk_hdr);
 	}
+#endif
 
 	return 0;
 }
@@ -424,6 +432,7 @@ int bootimg_set_cmdline(boot_img *image, const char *cmdline)
 	return 0;
 }
 
+#ifndef NO_MTK_SUPPORT
 static boot_mtk_hdr *new_mtk_header(void)
 {
 	boot_mtk_hdr *hdr = malloc(sizeof(struct boot_mtk_hdr));
@@ -478,6 +487,7 @@ int bootimg_set_mtk_header(boot_img *image, const byte item, const char *string)
 
 	return 0;
 }
+#endif
 
 int bootimg_set_pagesize(boot_img *image, const int pagesize)
 {
@@ -557,7 +567,9 @@ boot_img *new_boot_image(void)
 /* all freeing after errors is done by the calling function */
 static int read_boot_image_item(boot_img *image, int fd, const byte item)
 {
+#ifndef NO_MTK_SUPPORT
 	char magic[BOOT_MTK_HDR_MAGIC_SIZE];
+#endif
 	size_t sz;
 	boot_img_item *i = get_item(image, item);
 
@@ -568,6 +580,7 @@ static int read_boot_image_item(boot_img *image, int fd, const byte item)
 	if (!sz)
 		return 0; /* item is empty */
 
+#ifndef NO_MTK_SUPPORT
 	if (sz < sizeof(struct boot_mtk_hdr))
 		goto read_item; /* too small to contain a mtk header */
 
@@ -592,6 +605,7 @@ static int read_boot_image_item(boot_img *image, int fd, const byte item)
 	sz = i->mtk_header->size;
 
 read_item:
+#endif
 	i->size = sz;
 
 	/* allocate the item's data */
@@ -681,6 +695,7 @@ static int write_boot_image_item(boot_img *image, int fd, const byte item)
 	if (!i)
 		return EINVAL;
 
+#ifndef NO_MTK_SUPPORT
 	if (i->mtk_header) {
 		/* write the mtk header to the fd */
 		if (write(fd, i->mtk_header, sizeof(struct boot_mtk_hdr)) != sizeof(struct boot_mtk_hdr))
@@ -689,6 +704,9 @@ static int write_boot_image_item(boot_img *image, int fd, const byte item)
 	} else {
 		sz = *get_hdr_item_size(image, item);
 	}
+#else
+	sz = *get_hdr_item_size(image, item);
+#endif
 
 	if (!sz)
 		return 0;
@@ -748,25 +766,25 @@ void free_boot_image(boot_img *image)
 	if (!image)
 		return;
 
-	if (image->kernel.mtk_header)
-		free(image->kernel.mtk_header);
 	if (image->kernel.data)
 		free(image->kernel.data);
-
-	if (image->ramdisk.mtk_header)
-		free(image->ramdisk.mtk_header);
 	if (image->ramdisk.data)
 		free(image->ramdisk.data);
-
-	if (image->second.mtk_header)
-		free(image->second.mtk_header);
 	if (image->second.data)
 		free(image->second.data);
-
-	if (image->dt.mtk_header)
-		free(image->dt.mtk_header);
 	if (image->dt.data)
 		free(image->dt.data);
+
+#ifndef NO_MTK_SUPPORT
+	if (image->kernel.mtk_header)
+		free(image->kernel.mtk_header);
+	if (image->ramdisk.mtk_header)
+		free(image->ramdisk.mtk_header);
+	if (image->second.mtk_header)
+		free(image->second.mtk_header);
+	if (image->dt.mtk_header)
+		free(image->dt.mtk_header);
+#endif
 
 	free(image);
 }
