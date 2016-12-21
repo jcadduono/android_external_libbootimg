@@ -154,28 +154,28 @@ byte *bootimg_generate_hash(const boot_img *image)
 
 #ifndef NO_MTK_SUPPORT
 	if (image->kernel.mtk_header)
-		SHA_update(&ctx, image->kernel.mtk_header, sizeof(struct boot_mtk_hdr));
+		SHA_update(&ctx, image->kernel.mtk_header, sizeof(boot_mtk_hdr));
 #endif
 	SHA_update(&ctx, image->kernel.data, image->kernel.size);
 	SHA_update(&ctx, &image->hdr.kernel_size, sizeof(image->hdr.kernel_size));
 
 #ifndef NO_MTK_SUPPORT
 	if (image->ramdisk.mtk_header)
-		SHA_update(&ctx, image->ramdisk.mtk_header, sizeof(struct boot_mtk_hdr));
+		SHA_update(&ctx, image->ramdisk.mtk_header, sizeof(boot_mtk_hdr));
 #endif
 	SHA_update(&ctx, image->ramdisk.data, image->ramdisk.size);
 	SHA_update(&ctx, &image->hdr.ramdisk_size, sizeof(image->hdr.ramdisk_size));
 
 #ifndef NO_MTK_SUPPORT
 	if (image->second.mtk_header)
-		SHA_update(&ctx, image->second.mtk_header, sizeof(struct boot_mtk_hdr));
+		SHA_update(&ctx, image->second.mtk_header, sizeof(boot_mtk_hdr));
 #endif
 	SHA_update(&ctx, image->second.data, image->second.size);
 	SHA_update(&ctx, &image->hdr.second_size, sizeof(image->hdr.second_size));
 
 #ifndef NO_MTK_SUPPORT
 	if (image->dt.mtk_header)
-		SHA_update(&ctx, image->dt.mtk_header, sizeof(struct boot_mtk_hdr));
+		SHA_update(&ctx, image->dt.mtk_header, sizeof(boot_mtk_hdr));
 #endif
 	SHA_update(&ctx, image->dt.data, image->dt.size);
 	SHA_update(&ctx, &image->hdr.dt_size, sizeof(image->hdr.dt_size));
@@ -222,7 +222,7 @@ int bootimg_load(boot_img *image, const byte item, const char *file)
 #ifndef NO_MTK_SUPPORT
 	if (i->mtk_header) {
 		i->mtk_header->size = sz;
-		*hsz += sizeof(struct boot_mtk_hdr);
+		*hsz += sizeof(boot_mtk_hdr);
 	}
 #endif
 
@@ -435,7 +435,7 @@ int bootimg_set_cmdline(boot_img *image, const char *cmdline)
 #ifndef NO_MTK_SUPPORT
 static boot_mtk_hdr *new_mtk_header(void)
 {
-	boot_mtk_hdr *hdr = malloc(sizeof(struct boot_mtk_hdr));
+	boot_mtk_hdr *hdr = malloc(sizeof(boot_mtk_hdr));
 	if (!hdr)
 		return 0;
 
@@ -480,7 +480,7 @@ int bootimg_set_mtk_header(boot_img *image, const byte item, const char *string)
 			return ENOMEM;
 		hdr->size = *sz;
 		if (sz)
-			*sz += sizeof(*hdr);
+			*sz += sizeof(boot_mtk_hdr);
 	}
 
 	strcpy((char*)hdr->string, string);
@@ -546,7 +546,7 @@ boot_img *new_boot_image(void)
 {
 	boot_img *image;
 
-	image = calloc(1, sizeof(struct boot_img));
+	image = calloc(1, sizeof(boot_img));
 	if (!image)
 		return 0;
 
@@ -581,7 +581,7 @@ static int read_boot_image_item(boot_img *image, int fd, const byte item)
 		return 0; /* item is empty */
 
 #ifndef NO_MTK_SUPPORT
-	if (sz < sizeof(struct boot_mtk_hdr))
+	if (sz < sizeof(boot_mtk_hdr))
 		goto read_item; /* too small to contain a mtk header */
 
 	/* check for mtk magic */
@@ -591,15 +591,15 @@ static int read_boot_image_item(boot_img *image, int fd, const byte item)
 		goto read_item; /* not an mtk header */
 
 	/* allocate the mtk header */
-	i->mtk_header = malloc(sizeof(struct boot_mtk_hdr));
+	i->mtk_header = malloc(sizeof(boot_mtk_hdr));
 	if (!i->mtk_header)
 		return ENOMEM;
 
 	/* read the mtk header from the fd */
-	if (read(fd, i->mtk_header, sizeof(struct boot_mtk_hdr)) != sizeof(struct boot_mtk_hdr))
+	if (read(fd, i->mtk_header, sizeof(boot_mtk_hdr)) != sizeof(boot_mtk_hdr))
 		return EIO;
 
-	if (i->mtk_header->size != (sz - sizeof(struct boot_mtk_hdr)))
+	if (i->mtk_header->size != (sz - sizeof(boot_mtk_hdr)))
 		return EINVAL;
 
 	sz = i->mtk_header->size;
@@ -642,11 +642,11 @@ boot_img *load_boot_image(const char *file)
 
 	lseek(fd, i, SEEK_SET);
 
-	image = calloc(1, sizeof(struct boot_img));
+	image = calloc(1, sizeof(boot_img));
 	if (!image)
 		goto oops;
 
-	if (read(fd, &image->hdr, sizeof(image->hdr)) != sizeof(image->hdr))
+	if (read(fd, &image->hdr, sizeof(boot_img_hdr)) != sizeof(boot_img_hdr))
 		goto oops;
 
 	image->base = image->hdr.kernel_addr - 0x00008000U;
@@ -655,7 +655,7 @@ boot_img *load_boot_image(const char *file)
 	image->second.offset = image->hdr.second_addr - image->base;
 	image->tags_offset = image->hdr.tags_addr - image->base;
 
-	seek_padding(fd, image->hdr.pagesize, sizeof(image->hdr));
+	seek_padding(fd, image->hdr.pagesize, sizeof(boot_img_hdr));
 
 	if (image->hdr.kernel_size
 	 && read_boot_image_item(image, fd, BOOTIMG_KERNEL))
@@ -698,7 +698,7 @@ static int write_boot_image_item(boot_img *image, int fd, const byte item)
 #ifndef NO_MTK_SUPPORT
 	if (i->mtk_header) {
 		/* write the mtk header to the fd */
-		if (write(fd, i->mtk_header, sizeof(struct boot_mtk_hdr)) != sizeof(struct boot_mtk_hdr))
+		if (write(fd, i->mtk_header, sizeof(boot_mtk_hdr)) != sizeof(boot_mtk_hdr))
 			return EIO;
 		sz = i->mtk_header->size;
 	} else {
@@ -723,9 +723,9 @@ int write_boot_image(boot_img *image, const char *file)
 	if (fd < 0)
 		return EACCES;
 
-	if (write(fd, &image->hdr, sizeof(image->hdr)) != sizeof(image->hdr))
+	if (write(fd, &image->hdr, sizeof(boot_img_hdr)) != sizeof(boot_img_hdr))
 		goto oops;
-	if (write_padding(fd, image->hdr.pagesize, sizeof(image->hdr)))
+	if (write_padding(fd, image->hdr.pagesize, sizeof(boot_img_hdr)))
 		goto oops;
 
 	if (image->hdr.kernel_size) {
