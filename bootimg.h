@@ -45,6 +45,8 @@ typedef unsigned char byte;
 #define BOOT_DEFAULT_SECOND_OFFSET  0x00F00000U
 #define BOOT_DEFAULT_TAGS_OFFSET    0x00000100U
 
+/* the header of an Android boot image
+ * this is the beginning of all valid images */
 typedef struct boot_img_hdr
 {
 	byte magic[BOOT_MAGIC_SIZE];
@@ -77,7 +79,9 @@ typedef struct boot_img_hdr
 } __attribute__((packed)) boot_img_hdr;
 
 #ifndef NO_MTK_SUPPORT
-typedef struct boot_mtk_hdr /* ramdisk header used on some mediatek devices */
+/* a pointless header prepended to all the objects embedded
+ * within the Android boot image on some MediaTek devices, shame! */
+typedef struct boot_mtk_hdr
 {
 	byte magic[BOOT_MTK_HDR_MAGIC_SIZE];
 
@@ -89,7 +93,9 @@ typedef struct boot_mtk_hdr /* ramdisk header used on some mediatek devices */
 } __attribute__((packed)) boot_mtk_hdr;
 #endif
 
-typedef struct boot_img_item /* an item embedded in the boot image, ex. kernel */
+/* an item embedded in the Android boot image, ex. kernel/ramdisk/second/dt
+ * this is not an actual layout */
+typedef struct boot_img_item
 {
 #ifndef NO_MTK_SUPPORT
 	boot_mtk_hdr *mtk_header;
@@ -101,6 +107,8 @@ typedef struct boot_img_item /* an item embedded in the boot image, ex. kernel *
 	uint32_t offset;
 } boot_img_item;
 
+/* a container struct for working with Android boot images
+ * this is not an actual layout */
 typedef struct boot_img
 {
 	boot_img_hdr hdr;      /* the boot image header */
