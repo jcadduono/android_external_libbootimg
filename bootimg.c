@@ -84,9 +84,10 @@ enum
 	ARG_RAMDISK         = 1U << 14,
 	ARG_SECOND          = 1U << 15,
 	ARG_DT              = 1U << 16,
-	ARG_HASH            = 1U << 17,
-	ARG_CMDLINE_ARG     = 1U << 18
-	/* ARG_ACTUALHASH   = 1U << 19 */
+	ARG_CHROMEOS        = 1U << 17, /* unused */
+	ARG_CMDLINE_ARG     = 1U << 18,
+	ARG_HASH            = 1U << 19,
+	ARG_ACTUALHASH      = 1U << 20, /* unused */
 };
 
 /* match arg flags (for verbose output) */
@@ -111,9 +112,10 @@ enum
 	INFO_RAMDISK_SIZE   = 1U << 14,
 	INFO_SECOND_SIZE    = 1U << 15,
 	INFO_DT_SIZE        = 1U << 16,
-	INFO_HASH           = 1U << 17,
-	/* ARG_CMDLINE_ARG  = 1U << 18, */
-	INFO_ACTUALHASH     = 1U << 19
+	INFO_CHROMEOS       = 1U << 17,
+	INFO_CMDLINE_ARG    = 1U << 18, /* unused */
+	INFO_HASH           = 1U << 19,
+	INFO_ACTUALHASH     = 1U << 20,
 };
 
 static int write_string_to_file(const char *file, const char *string)
@@ -223,6 +225,9 @@ void print_boot_info(const boot_img *image, const unsigned info)
 	if (info & INFO_DT_MTK && image->dt.mtk_header)
 		LOGV("BOARD_DT_MTK \"%s\"", image->dt.mtk_header->string);
 #endif
+
+	if (info & INFO_CHROMEOS && image->chromeos)
+		LOGV("BOARD_CHROMEOS %u", image->chromeos);
 
 	if (info & INFO_HASH) {
 		char *hash = read_hash((byte*)image->hdr.hash);
@@ -688,6 +693,8 @@ info:
 		if (image->dt.mtk_header)
 			info |= INFO_DT_MTK;
 #endif
+		if (image->chromeos)
+			info |= INFO_CHROMEOS;
 	}
 
 	if (args & ARG_HASH)
@@ -788,6 +795,11 @@ unpack:
 			write_string_to_file(file, 0);
 	}
 #endif
+	if (image->chromeos) {
+		setfile("chromeos");
+		write_string_to_file(file, 0);
+	}
+
 	goto free;
 
 create:

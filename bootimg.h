@@ -23,6 +23,7 @@
 typedef unsigned char byte;
 
 #define BOOT_MAGIC "ANDROID!"
+#define BOOT_MAGIC_CHROMEOS "CHROMEOS"
 #define BOOT_MAGIC_SIZE 8
 #define BOOT_BOARD_SIZE 16
 #define BOOT_ARGS_SIZE 512
@@ -120,6 +121,8 @@ typedef struct boot_img
 
 	uint32_t base;         /* base location offsets are relative to */
 	uint32_t tags_offset;  /* offset of kernel tags */
+
+	unsigned chromeos:1;
 } boot_img;
 
 /*

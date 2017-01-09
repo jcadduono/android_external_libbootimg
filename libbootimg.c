@@ -622,7 +622,7 @@ read_item:
 
 boot_img *load_boot_image(const char *file)
 {
-	int fd, i;
+	int fd, i = 0, j = 0, chromeos = 0;
 	char magic[BOOT_MAGIC_SIZE];
 	boot_img *image = 0;
 
@@ -630,21 +630,32 @@ boot_img *load_boot_image(const char *file)
 	if (fd < 0)
 		return 0;
 
-	for (i = 0; i <= 4096; i++) {
-		lseek(fd, i, SEEK_SET);
-		read(fd, magic, BOOT_MAGIC_SIZE);
+search:
+	for (i = 0; i <= 65536; i += 512) {
+		lseek(fd, j + i, SEEK_SET);
+		if (!read(fd, magic, BOOT_MAGIC_SIZE))
+			break; /* end of file */
 		if (!memcmp(magic, BOOT_MAGIC, BOOT_MAGIC_SIZE))
-			break;
+			goto found;
+		if (!memcmp(magic, BOOT_MAGIC_CHROMEOS, BOOT_MAGIC_SIZE)) {
+			chromeos = 1;
+			j += 65536;
+			goto search;
+		}
 	}
 
-	if (i > 4096)
-		goto oops;
+	/* no android boot image magic found */
+	goto oops;
 
-	lseek(fd, i, SEEK_SET);
+found:
+	lseek(fd, j + i, SEEK_SET);
 
 	image = calloc(1, sizeof(boot_img));
 	if (!image)
 		goto oops;
+
+	if (chromeos)
+		image->chromeos = 1;
 
 	if (read(fd, &image->hdr, sizeof(boot_img_hdr)) != sizeof(boot_img_hdr))
 		goto oops;
