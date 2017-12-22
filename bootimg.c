@@ -298,7 +298,7 @@ static void print_usage(const char *app)
 		"   [ -km, --kernel_mtk \"KERNEL\"      ]\n"
 		"   [ -rm, --ramdisk_mtk \"ROOTFS\"     ]\n"
 		"   [ -sm, --second_mtk \"SECOND\"      ]\n"
-		"   [ -tm, --dt_mtk \"DTIMAGE\"         ]\n"
+		"   [ -dm, --dt_mtk \"DTIMAGE\"         ]\n"
 	);
 #endif
 	LOGE(
