@@ -258,15 +258,18 @@ int bootimg_set_board(boot_img *image, const char *board)
 int bootimg_set_os_version(boot_img *image, const char *os_version)
 {
 	unsigned major, minor, revision;
-	uint32_t patch_level;
+	uint32_t patch_level = image->hdr.os_version & 2047;
+
+	if (!os_version) {
+		image->hdr.os_version = patch_level;
+		return 0;
+	}
 
 	if (sscanf(os_version, "%u.%u.%u", &major, &minor, &revision) != 3)
 		return EINVAL;
 
 	if (major > 127 || minor > 127 || revision > 127)
 		return EINVAL;
-
-	patch_level = image->hdr.os_version & 2047;
 
 	image->hdr.os_version = (major << 14 | minor << 7 | revision) << 11 | patch_level;
 
@@ -276,7 +279,12 @@ int bootimg_set_os_version(boot_img *image, const char *os_version)
 int bootimg_set_patch_level(boot_img *image, const char *patch_level)
 {
 	unsigned year, month;
-	uint32_t os_version;
+	uint32_t os_version = image->hdr.os_version >> 11;
+
+	if (!patch_level) {
+		image->hdr.os_version = os_version << 11;
+		return 0;
+	}
 
 	if (sscanf(patch_level, "%u-%u", &year, &month) != 2)
 		return EINVAL;
@@ -284,8 +292,6 @@ int bootimg_set_patch_level(boot_img *image, const char *patch_level)
 	if (year < 2000 || year > 2127
 	    || month < 1 || month > 12)
 		return EINVAL;
-
-	os_version = image->hdr.os_version >> 11;
 
 	image->hdr.os_version = os_version << 11 | (((year - 2000) & 127) << 4 | month);
 
@@ -295,13 +301,11 @@ int bootimg_set_patch_level(boot_img *image, const char *patch_level)
 char *bootimg_get_os_version(const boot_img *image)
 {
 	unsigned major, minor, revision;
-	uint32_t os_version;
+	uint32_t os_version = image->hdr.os_version >> 11;
 	char *buf;
 
-	if (!image->hdr.os_version)
+	if (!os_version)
 		return 0;
-
-	os_version = image->hdr.os_version >> 11;
 
 	major = (os_version >> 14) & 127;
 	minor = (os_version >> 7) & 127;
@@ -320,13 +324,11 @@ char *bootimg_get_os_version(const boot_img *image)
 char *bootimg_get_patch_level(const boot_img *image)
 {
 	unsigned year, month;
-	uint32_t patch_level;
+	uint32_t patch_level = image->hdr.os_version & 2047;
 	char *buf;
 
-	if (!image->hdr.os_version)
+	if (!patch_level)
 		return 0;
-
-	patch_level = image->hdr.os_version & 2047;
 
 	year = (patch_level >> 4) + 2000;
 	month = patch_level & 15;
