@@ -64,7 +64,13 @@ typedef struct boot_img_hdr
 	uint32_t tags_addr;    /* physical addr for kernel tags */
 	uint32_t pagesize;     /* flash page size we assume     */
 	uint32_t dt_size;      /* device tree size in bytes     */
-	uint32_t unused;       /* future expansion: should be 0 */
+
+	/* operating system version and security patch level; for
+	 * version "A.B.C" and patch level "Y-M-D":
+	 * ver = A << 14 | B << 7 | C         (7 bits for each of A, B, C)
+	 * lvl = ((Y - 2000) & 127) << 4 | M  (7 bits for Y, 4 bits for M)
+	 * os_version = ver << 11 | lvl */
+	uint32_t os_version;
 
 	byte board[BOOT_BOARD_SIZE];  /* asciiz product name */
 
@@ -179,6 +185,13 @@ int bootimg_load(boot_img *image, const byte item, const char *file);
 int bootimg_save(boot_img *image, const byte item, const char *file);
 
 int bootimg_set_board(boot_img *image, const char *board);
+
+int bootimg_set_os_version(boot_img *image, const char *os_version);
+int bootimg_set_patch_level(boot_img *image, const char *patch_level);
+
+/* returns a malloc char * (string) that should be freed */
+char *bootimg_get_os_version(const boot_img *image);
+char *bootimg_get_patch_level(const boot_img *image);
 
 int bootimg_set_cmdline(boot_img *image, const char *cmdline);
 /* a null val will delete the arg from the cmdline */

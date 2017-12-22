@@ -14,6 +14,7 @@
 ** limitations under the License.
 */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -252,6 +253,92 @@ int bootimg_set_board(boot_img *image, const char *board)
 	strcpy((char*)image->hdr.board, board);
 
 	return 0;
+}
+
+int bootimg_set_os_version(boot_img *image, const char *os_version)
+{
+	unsigned major, minor, revision;
+	uint32_t patch_level;
+
+	if (sscanf(os_version, "%u.%u.%u", &major, &minor, &revision) != 3)
+		return EINVAL;
+
+	if (major > 127 || minor > 127 || revision > 127)
+		return EINVAL;
+
+	patch_level = image->hdr.os_version & 2047;
+
+	image->hdr.os_version = (major << 14 | minor << 7 | revision) << 11 | patch_level;
+
+	return 0;
+}
+
+int bootimg_set_patch_level(boot_img *image, const char *patch_level)
+{
+	unsigned year, month;
+	uint32_t os_version;
+
+	if (sscanf(patch_level, "%u-%u", &year, &month) != 2)
+		return EINVAL;
+
+	if (year < 2000 || year > 2127
+	    || month < 1 || month > 12)
+		return EINVAL;
+
+	os_version = image->hdr.os_version >> 11;
+
+	image->hdr.os_version = os_version << 11 | (((year - 2000) & 127) << 4 | month);
+
+	return 0;
+}
+
+char *bootimg_get_os_version(const boot_img *image)
+{
+	unsigned major, minor, revision;
+	uint32_t os_version;
+	char *buf;
+
+	if (!image->hdr.os_version)
+		return 0;
+
+	os_version = image->hdr.os_version >> 11;
+
+	major = (os_version >> 14) & 127;
+	minor = (os_version >> 7) & 127;
+	revision = os_version & 127;
+
+	if (major > 127 || minor > 127 || revision > 127)
+		return 0;
+
+	buf = calloc(12, sizeof(char)); /* AAA.BBB.CCC + NULL */
+	if (buf)
+		sprintf(buf, "%u.%u.%u", major, minor, revision);
+
+	return buf;
+}
+
+char *bootimg_get_patch_level(const boot_img *image)
+{
+	unsigned year, month;
+	uint32_t patch_level;
+	char *buf;
+
+	if (!image->hdr.os_version)
+		return 0;
+
+	patch_level = image->hdr.os_version & 2047;
+
+	year = (patch_level >> 4) + 2000;
+	month = patch_level & 15;
+
+	if (year < 2000 || year > 2127 || month < 1 || month > 12)
+		return 0;
+
+	buf = calloc(11, sizeof(char)); /* YYYY-MM-DD + NULL */
+	if (buf)
+		sprintf(buf, "%.4u-%.2u-%.2u", year, month, 1);
+
+	return buf;
 }
 
 int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val)

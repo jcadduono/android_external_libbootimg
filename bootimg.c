@@ -88,6 +88,8 @@ enum
 	ARG_CMDLINE_ARG     = 1U << 18,
 	ARG_HASH            = 1U << 19,
 	ARG_ACTUALHASH      = 1U << 20, /* unused */
+	ARG_OS_VERSION      = 1U << 21,
+	ARG_PATCH_LEVEL     = 1U << 22,
 };
 
 /* match arg flags (for verbose output) */
@@ -116,6 +118,8 @@ enum
 	INFO_CMDLINE_ARG    = 1U << 18, /* unused */
 	INFO_HASH           = 1U << 19,
 	INFO_ACTUALHASH     = 1U << 20,
+	INFO_OS_VERSION     = 1U << 21,
+	INFO_PATCH_LEVEL    = 1U << 22,
 };
 
 static int write_string_to_file(const char *file, const char *string)
@@ -192,6 +196,21 @@ void print_boot_info(const boot_img *image, const unsigned info)
 	if (info & INFO_CMDLINE)
 		LOGV("BOARD_CMDLINE \"%s\"", image->hdr.cmdline);
 
+	if (info & INFO_OS_VERSION && image->hdr.os_version) {
+		char *os_version = bootimg_get_os_version(image);
+		if (os_version) {
+			LOGV("BOARD_OS_VERSION %s", os_version);
+			free(os_version);
+		}
+	}
+	if (info & INFO_PATCH_LEVEL && image->hdr.os_version) {
+		char *patch_level = bootimg_get_patch_level(image);
+		if (patch_level) {
+			LOGV("BOARD_OS_PATCH_LEVEL %s", patch_level);
+			free(patch_level);
+		}
+	}
+
 	if (info & INFO_PAGESIZE)
 		LOGV("BOARD_PAGESIZE %u", image->hdr.pagesize);
 
@@ -237,15 +256,15 @@ void print_boot_info(const boot_img *image, const unsigned info)
 		}
 	}
 	if (info & INFO_ACTUALHASH) {
-		char *hash;
 		byte *bytes = bootimg_generate_hash(image);
-		if (!bytes)
-			return;
-		if ((hash = read_hash(bytes))) {
-			LOGV("ACTUALHASH 0x%s", hash);
-			free(hash);
+		if (bytes) {
+			char *hash = read_hash(bytes);
+			if (hash) {
+				LOGV("ACTUALHASH 0x%s", hash);
+				free(hash);
+			}
+			free(bytes);
 		}
-		free(bytes);
 	}
 }
 
@@ -262,28 +281,30 @@ static void print_usage(const char *app)
 	);
 	LOGE(
 		" Options: (set value only for create/update mode)\n"
-		"   [ -k,  --kernel \"kernel\"        ]\n"
-		"   [ -r,  --ramdisk \"ramdisk\"      ]\n"
-		"   [ -s,  --second \"second\"        ]\n"
-		"   [ -d,  --dt \"dt.img\"            ]\n"
-		"   [ -m,  --board \"board magic\"    ]\n"
-		"   [ -l,  --cmdline \"boot cmdline\" ]\n"
-		"   [ -a,  --arg \"cmdline\" \"value\"  ]\n"
-		"   [ -p,  --pagesize <size>        ]\n"
-		"   [ -b,  --base <hex>             ]\n"
-		"   [ -ko, --kernel_offset <hex>    ]\n"
-		"   [ -ro, --ramdisk_offset <hex>   ]\n"
-		"   [ -so, --second_offset <hex>    ]\n"
-		"   [ -to, --tags_offset <hex>      ]\n"
-		"   [ -h,  --hash                   ]\n"
+		"   [ -k,  --kernel \"kernel\"          ]\n"
+		"   [ -r,  --ramdisk \"ramdisk\"        ]\n"
+		"   [ -s,  --second \"second\"          ]\n"
+		"   [ -d,  --dt \"dt.img\"              ]\n"
+		"   [ -m,  --board \"board magic\"      ]\n"
+		"   [ -os, --os_version \"A.B.C\"       ]\n"
+		"   [ -pl, --patch_level \"YYYY-MM-DD\" ]\n"
+		"   [ -l,  --cmdline \"boot cmdline\"   ]\n"
+		"   [ -a,  --arg \"cmdline\" \"value\"    ]\n"
+		"   [ -p,  --pagesize <size>          ]\n"
+		"   [ -b,  --base <hex>               ]\n"
+		"   [ -ko, --kernel_offset <hex>      ]\n"
+		"   [ -ro, --ramdisk_offset <hex>     ]\n"
+		"   [ -so, --second_offset <hex>      ]\n"
+		"   [ -to, --tags_offset <hex>        ]\n"
+		"   [ -h,  --hash                     ]\n"
 	);
 #ifndef NO_MTK_SUPPORT
 	LOGE(
 		" Options for MediaTek devices:\n"
-		"   [ -km, --kernel_mtk \"KERNEL\"    ]\n"
-		"   [ -rm, --ramdisk_mtk \"ROOTFS\"   ]\n"
-		"   [ -sm, --second_mtk \"SECOND\"    ]\n"
-		"   [ -tm, --dt_mtk \"DTIMAGE\"       ]\n"
+		"   [ -km, --kernel_mtk \"KERNEL\"      ]\n"
+		"   [ -rm, --ramdisk_mtk \"ROOTFS\"     ]\n"
+		"   [ -sm, --second_mtk \"SECOND\"      ]\n"
+		"   [ -tm, --dt_mtk \"DTIMAGE\"         ]\n"
 	);
 #endif
 	LOGE(
@@ -295,7 +316,7 @@ static void print_usage(const char *app)
 		"     -i,  --input \"directory\"\n"
 		" Update:\n"
 		"     -i,  --input \"boot.img\"\n"
-		"   [ -o,  --output \"boot.img\"      ]\n"
+		"   [ -o,  --output \"boot.img\"        ]\n"
 	);
 	LOGE(
 		"To remove an item from the image, specify "
@@ -328,7 +349,7 @@ int main(const int argc, const char** argv)
 	DIR *dfd;
 	const char *c, *input = 0, *output = 0;
 	char file[PATH_MAX], buf[1024], hex[16], *bname = 0,
-		*board = 0, *cmdline = 0,
+		*board = 0, *os_version = 0, *patch_level = 0, *cmdline = 0,
 		*kernel = 0, *ramdisk = 0, *second = 0, *dt = 0;
 #ifndef NO_MTK_SUPPORT
 	char *kernel_mtk = 0, *ramdisk_mtk = 0, *second_mtk = 0, *dt_mtk = 0;
@@ -467,6 +488,28 @@ int main(const int argc, const char** argv)
 				requireval;
 				breakifdelete;
 				board = strdup(argv[++i]);
+			}
+		} else
+		if (!strcmp(argv[i], "-os") || !strcmp(argv[i], "--os_version")) {
+			args |= ARG_OS_VERSION;
+			switch (mode) {
+			case MODE_CREATE:
+			case MODE_UPDATE:
+				unset(os_version);
+				requireval;
+				breakifdelete;
+				os_version = strdup(argv[++i]);
+			}
+		} else
+		if (!strcmp(argv[i], "-pl") || !strcmp(argv[i], "--patch_level")) {
+			args |= ARG_PATCH_LEVEL;
+			switch (mode) {
+			case MODE_CREATE:
+			case MODE_UPDATE:
+				unset(patch_level);
+				requireval;
+				breakifdelete;
+				patch_level = strdup(argv[++i]);
 			}
 		} else
 		if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--cmdline")) {
@@ -673,6 +716,8 @@ info:
 
 		if (*image->hdr.board)
 			info |= INFO_MAGIC;
+		if (image->hdr.os_version)
+			info |= INFO_OS_VERSION | INFO_PATCH_LEVEL;
 		if (*image->hdr.cmdline)
 			info |= INFO_CMDLINE;
 		if (image->kernel.size)
@@ -714,6 +759,20 @@ unpack:
 	if (args & ARG_BOARD || !args) {
 		setfile("board");
 		write_string_to_file(file, (char*)image->hdr.board);
+	}
+	if (args & ARG_OS_VERSION || !args) {
+		os_version = bootimg_get_os_version(image);
+		if (os_version) {
+			setfile("os_version");
+			write_string_to_file(file, os_version);
+		}
+	}
+	if (args & ARG_PATCH_LEVEL || !args) {
+		patch_level = bootimg_get_patch_level(image);
+		if (patch_level) {
+			setfile("patch_level");
+			write_string_to_file(file, patch_level);
+		}
 	}
 	if (args & ARG_CMDLINE || !args) {
 		setfile("cmdline");
@@ -827,6 +886,22 @@ create:
 			foundfile("board");
 			board = strdup(buf);
 			args |= ARG_BOARD;
+			continue;
+		}
+		if (!(args & ARG_OS_VERSION) && !strcmp(c, "os_version")) {
+			if (read_string_from_file(file, buf, sizeof(buf)))
+				continue;
+			foundfile("os_version");
+			os_version = strdup(buf);
+			args |= ARG_OS_VERSION;
+			continue;
+		}
+		if (!(args & ARG_PATCH_LEVEL) && !strcmp(c, "patch_level")) {
+			if (read_string_from_file(file, buf, sizeof(buf)))
+				continue;
+			foundfile("patch_level");
+			patch_level = strdup(buf);
+			args |= ARG_PATCH_LEVEL;
 			continue;
 		}
 		if (!(args & ARG_CMDLINE) && !strcmp(c, "cmdline")) {
@@ -983,6 +1058,14 @@ modify:
 	 && (ret = bootimg_set_board(image, board)))
 		failto("set board magic");
 
+	if (args & ARG_OS_VERSION
+	 && (ret = bootimg_set_os_version(image, os_version)))
+		failto("set OS version");
+
+	if (args & ARG_PATCH_LEVEL
+	 && (ret = bootimg_set_patch_level(image, patch_level)))
+		failto("set patch level");
+
 	if (args & ARG_CMDLINE
 	 && (ret = bootimg_set_cmdline(image, cmdline)))
 		failto("set cmdline");
@@ -1052,6 +1135,8 @@ modify:
 free:
 	unset(bname);
 	unset(board);
+	unset(os_version);
+	unset(patch_level);
 	unset(cmdline);
 	unset(kernel);
 	unset(ramdisk);
