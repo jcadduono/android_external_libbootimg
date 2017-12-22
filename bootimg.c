@@ -171,12 +171,6 @@ static int read_string_from_file(const char* file, char *buf, off_t len)
 	return 0;
 }
 
-static char *basename(char const *path)
-{
-	const char *s = strrchr(path, '/');
-	return strdup(s ? s + 1 : path);
-}
-
 static char *read_hash(const byte *hash)
 {
 	char *str = malloc(SHA_DIGEST_SIZE * 2 + 1);
@@ -339,7 +333,7 @@ static void print_usage(const char *app)
 #define requireval { if (i > argc - 2) usage("%s requires a value in this mode!", argv[i]); }
 #define breakifdelete { if (!strcmp(argv[i + 1], DELETE_VALUE)) { i++; break; } }
 #define foundfile(item) { if (verbose > 1) LOGV("Found %s: %s", item, file); }
-#define setfile(name) sprintf(file, "%s/%s-%s", output, bname, name);
+#define setfile(name) sprintf(file, "%s/%s", output, name);
 
 int main(const int argc, const char** argv)
 {
@@ -348,7 +342,7 @@ int main(const int argc, const char** argv)
 	struct dirent *dp;
 	DIR *dfd;
 	const char *c, *input = 0, *output = 0;
-	char file[PATH_MAX], buf[1024], hex[16], *bname = 0,
+	char file[PATH_MAX], buf[1024], hex[16],
 		*board = 0, *os_version = 0, *patch_level = 0, *cmdline = 0,
 		*kernel = 0, *ramdisk = 0, *second = 0, *dt = 0;
 #ifndef NO_MTK_SUPPORT
@@ -753,8 +747,6 @@ info:
 	/* otherwise continue to unpack */
 
 unpack:
-	bname = basename(input);
-
 	args &= ~ARG_HASH; /* so --hash doesn't extract nothing */
 
 	if (args & ARG_BOARD || !args) {
@@ -875,12 +867,17 @@ create:
 		failto("open boot image directory");
 
 	while ((dp = readdir(dfd))) {
-		if (!(c = strrchr(dp->d_name, '-')))
-			continue;
-		sprintf(file, "%s/%s", input, dp->d_name);
+		c = dp->d_name;
+		if (strrchr(c, '-')) {
+			/* prefixed by a base name, ex. boot.img */
+			c = strrchr(c, '-') + 1;
+			if (!*c)
+				continue; /* - is the last character */
+		}
+		snprintf(file, sizeof(file), "%s/%s", input, dp->d_name);
 		if (stat(file, &st) || !S_ISREG(st.st_mode))
 			continue;
-		c++;
+
 		if (!(args & ARG_BOARD) && !strcmp(c, "board")) {
 			if (read_string_from_file(file, buf, sizeof(buf)))
 				continue;
@@ -1134,7 +1131,6 @@ modify:
 		failto("write boot image");
 
 free:
-	unset(bname);
 	unset(board);
 	unset(os_version);
 	unset(patch_level);
