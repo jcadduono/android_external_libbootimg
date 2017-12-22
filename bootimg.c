@@ -653,6 +653,7 @@ int main(const int argc, const char** argv)
 					output = argv[i];
 					continue;
 				}
+				/* Fall-through */
 			case MODE_INFO:
 			case MODE_UPDATE:
 			case MODE_UNPACK:

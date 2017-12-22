@@ -398,6 +398,7 @@ int bootimg_set_cmdline_arg(boot_img *image, const char *arg, const char *val)
 		case '"':
 			if (c == str || *(c - 1) != '\\') /* skip escaped quotes */
 				in_quot = !in_quot;
+			/* Fall-through */
 		default:
 			if (!arg_start)
 				arg_start = c;
